@@ -137,7 +137,8 @@ The in-app pane has fewer keys because Claude Code lets a plugin bind only
 single lowercase letters there.
 
 In the side pane each reply and each tool call ends with the time it was
-written to the transcript, in your local time.
+written to the transcript, in your local time. The keys in the header (and the
+message under them, which `e` expands) light up under the mouse.
 
 Copying an item puts on the clipboard: a reply as Claude wrote it (Markdown), a
 Bash call as its command and output, an edit as a unified diff. The side pane
@@ -156,6 +157,8 @@ must allow.
   side pane and open it again.
 - Conversations rewound to an earlier point show the abandoned branches too.
 - Colors assume a dark terminal theme.
+- The header's hover effect needs a terminal and multiplexer that report mouse
+  movement (xterm mouse mode 1003).
 - No syntax highlighting.
 
 ## Development

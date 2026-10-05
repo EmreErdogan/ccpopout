@@ -54,6 +54,7 @@ const S = {
   /** A gray of its own: the theme's (`gray`) is too faint to read a time in. */
   stamp: '38;5;245',
   headerBg: '48;5;237',
+  hoverBg: '48;5;240',
   addBg: '48;5;22',
   delBg: '48;5;52',
   codeBg: '48;5;235',
@@ -867,6 +868,9 @@ class View {
     /** While set, the help stands in for the turn; `scroll` is kept aside. */
     this.isHelp = false
     this.turnScroll = 0
+    /** Where the mouse was last, and what of the header it was over when last drawn. */
+    this.pointer = undefined
+    this.hovered = ''
   }
 
   get columns() {
@@ -1217,6 +1221,23 @@ class View {
     }
   }
 
+  /** What of the header the mouse is over: a key of the keys row, 'title' for the message, '' for neither. */
+  over() {
+    if (this.pointer === undefined || !this.isMouseOn) return ''
+    const { x, y } = this.pointer
+    if (y === 1) {
+      const hit = this.hits.find(found => x >= found.from && x < found.to)
+      return hit === undefined || hit.isOff ? '' : hit.key
+    }
+    return !this.isHelp && this.count > 0 && y < this.headerRows ? 'title' : ''
+  }
+
+  /** The mouse moved; true when what it is over changed, and the header is to be redrawn. */
+  point(x, y) {
+    this.pointer = { x, y }
+    return this.over() !== this.hovered
+  }
+
   click(x, y) {
     if (y === 1) {
       const hit = this.hits.find(found => x >= found.from && x < found.to)
@@ -1251,18 +1272,24 @@ class View {
         item.key === 'e' && this.isExpanded ? 'collapse' : item.key === 'z' && this.isClean ? 'full' : item.key === 't' && this.isThinkingHidden ? 'show 💭' : item.label
       const cells = textWidth(item.key) + 1 + textWidth(label)
       if (used + cells + 2 > width) break
-      this.hits.push({ key: item.key, from: used + 1, to: used + 1 + cells })
-      const tone = isOff[item.key] ? S.dim : ''
-      nav += `${ESC}[${sgr(S.headerBg, S.bold, S.cyan, tone)}m${item.key}${RESET}${ESC}[${sgr(S.headerBg, tone)}m ${label}  `
+      // A cell either side is the key's too: the press target, lit under the mouse.
+      const hit = { key: item.key, from: used, to: used + cells + 2, isOff: isOff[item.key] === true }
+      this.hits.push(hit)
+      const isOver = !hit.isOff && this.isMouseOn && this.pointer?.y === 1 && this.pointer.x >= hit.from && this.pointer.x < hit.to
+      const bg = isOver ? S.hoverBg : S.headerBg
+      const tone = hit.isOff ? S.dim : ''
+      nav += `${ESC}[${sgr(bg, S.bold, S.cyan, tone)}m ${item.key}${RESET}${ESC}[${sgr(bg, tone)}m ${label} ${RESET}`
       used += cells + 2
     }
-    frame.push(`${ESC}[${S.headerBg}m ${nav}${ESC}[${S.headerBg}m${ESC}[K${RESET}`)
+    frame.push(`${nav}${ESC}[${S.headerBg}m${ESC}[K${RESET}`)
 
-    if (this.gapRows === 1) frame.push(`${ESC}[${S.headerBg}m${ESC}[K${RESET}`)
+    // The message is a press target too (it shows whole, or its start again).
+    const titleBg = this.over() === 'title' ? S.hoverBg : S.headerBg
+    if (this.gapRows === 1) frame.push(`${ESC}[${titleBg}m${ESC}[K${RESET}`)
 
     // Then which message, and how it starts.
     for (const title of this.titleRows()) {
-      frame.push(`${ESC}[${sgr(S.headerBg, S.bold)}m ${truncate(title, width - 2)}${ESC}[K${RESET}`)
+      frame.push(`${ESC}[${sgr(titleBg, S.bold)}m ${truncate(title, width - 2)}${ESC}[K${RESET}`)
     }
 
     // The rule, with where the window is.
@@ -1289,6 +1316,7 @@ class View {
       text += `${ESC}[${at + 1};1H${line}`
     })
     this.out.write(`${text}${ESC}[?2026l`)
+    this.hovered = this.over()
   }
 }
 
@@ -1308,8 +1336,9 @@ function paint(line, width) {
 
 // ───────────────────────────── input ─────────────────────────────
 
-const MOUSE_ON = `${ESC}[?1000h${ESC}[?1006h`
-const MOUSE_OFF = `${ESC}[?1006l${ESC}[?1000l`
+// Presses, and every move of the mouse: the header lights what it is over.
+const MOUSE_ON = `${ESC}[?1000h${ESC}[?1003h${ESC}[?1006h`
+const MOUSE_OFF = `${ESC}[?1006l${ESC}[?1003l${ESC}[?1000l`
 
 const SEQUENCES = {
   '[A': 'up',
@@ -1426,9 +1455,17 @@ function main() {
   process.stdin.setEncoding('utf8')
 
   process.stdin.on('data', chunk => {
+    let isDirty = false
     for (const event of parseInput(chunk)) {
+      if (event.mouse !== undefined && (event.mouse.button & 32) !== 0) {
+        // A move: drawn only when it changes what the mouse is over.
+        if (view.point(event.mouse.x, event.mouse.y)) isDirty = true
+        continue
+      }
+      isDirty = true
       if (event.mouse !== undefined) {
         const { button, x, y, isDown } = event.mouse
+        view.point(x, y)
         if (button === 64) view.scrollBy(-WHEEL_ROWS)
         else if (button === 65) view.scrollBy(WHEEL_ROWS)
         else if (button === 0 && isDown) view.click(x, y)
@@ -1442,7 +1479,7 @@ function main() {
         view.key(event.key)
       }
     }
-    view.draw()
+    if (isDirty) view.draw()
   })
   process.stdout.on('resize', () => {
     view.rows = undefined

@@ -51,7 +51,7 @@ const S = {
   cyan: '36',
   gray: '90',
   tool: '94',
-  /** A gray of its own: the theme's (`gray`) is too faint to read a time in. */
+  /** A gray of its own, for what is read but stands back (a time, Claude's thinking, where the window is): the theme's (`gray`) is too faint. */
   stamp: '38;5;245',
   headerBg: '48;5;237',
   hoverBg: '48;5;240',
@@ -985,7 +985,7 @@ class View {
         if (rows.length > 0 && rows.at(-1).segs.length > 0) rows.push(row())
         // Claude's own words: a bullet on the first row, the rest under it.
         // A reply of several rows folds to its first, as a call does.
-        // Its thinking is set apart: a thought bubble for the bullet, dim italics.
+        // Its thinking is set apart: a thought bubble for the bullet, gray italics.
         const isThinking = entry.kind === 'thinking'
         const mark = isThinking ? '💭 ' : '● '
         const pad = ' '.repeat(textWidth(mark))
@@ -993,7 +993,7 @@ class View {
         const foldedMark = isThinking ? `▸ ${mark}` : '▸ '
         const foldedPad = ' '.repeat(textWidth(foldedMark))
         let prose = proseRows(entry.text, width - foldedPad.length)
-        if (isThinking) prose = prose.map(line => ({ ...line, segs: line.segs.map(seg => ({ ...seg, s: sgr(S.dim, S.italic, seg.s) })) }))
+        if (isThinking) prose = prose.map(line => ({ ...line, segs: line.segs.map(seg => ({ ...seg, s: sgr(S.stamp, S.italic, seg.s) })) }))
         const id = `text:${first + 1 + item}`
         const isUnfolded = this.folds.get(id) ?? true
         const fold = prose.length > FOLDED_ROWS ? { id, isUnfolded, kind: 'text' } : undefined
@@ -1292,7 +1292,7 @@ class View {
       frame.push(`${ESC}[${sgr(titleBg, S.bold)}m ${truncate(title, width - 2)}${ESC}[K${RESET}`)
     }
 
-    // The rule, with where the window is.
+    // The rule, with where the window is: in the tool color, to be read among the dashes.
     // How many rows there are above and below the window, or that it is at an end.
     const below = rows.length - this.scroll - shown.length
     const range = max === 0 ? '' : ` ${this.scroll === 0 ? 'top' : `↑ ${this.scroll}`} · ${below <= 0 ? 'end' : `↓ ${below}`} `
@@ -1303,7 +1303,7 @@ class View {
       max === 0 ? '' : `${ESC}[${width}G${RESET}${at >= thumbAt && at < thumbAt + thumb ? `${ESC}[${S.cyan}m┃` : `${ESC}[${sgr(S.gray, S.dim)}m│`}${RESET}`
     const live = this.notice !== '' ? this.notice : this.isFollowing ? ' following ' : ''
     const rule = '─'.repeat(Math.max(0, width - range.length - live.length - 2))
-    frame.push(`${ESC}[${S.gray}m${rule}${live}${range}──${RESET}`)
+    frame.push(`${ESC}[${S.gray}m${rule}${ESC}[${S.tool}m${live}${range}${ESC}[${S.gray}m──${RESET}`)
 
     for (let at = 0; at < this.windowRows; at++) {
       const line = shown[at]

@@ -30,7 +30,7 @@ It comes in two forms that behave the same:
 
 ## Requirements
 
-- Claude Code with plugin hooks modules. Developed and tested on 2.1.288; the
+- Claude Code with plugin hooks modules. Developed and tested on 2.1.289; the
   API it uses is new and may change between releases.
 - For the side pane: Node.js 20 or newer on `PATH`, and Claude Code running
   inside herdr or tmux. Without a multiplexer `/popout side` opens the in-app
@@ -111,7 +111,7 @@ keyboard at the prompt. Press `ctrl+x tab` to hand it to the pane.
 The cursor (`▌`) moves over the items of a turn: each reply of Claude's and
 each tool call. In the side pane, what Claude notes between its tool calls
 (its thinking, as the transcript records it) is an item too, marked `💭` and
-drawn in dim italics.
+drawn in gray italics.
 
 | | Side pane | In-app pane |
 | --- | --- | --- |

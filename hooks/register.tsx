@@ -178,7 +178,7 @@ const HELP: [string, [string, string][]][] = [
     ['wheel', 'scrolls'],
   ]],
   ['All at once', [
-    ['a', 'tool calls: fold all when any is open, else open all (errors too)'],
+    ['a', 'everything (tool calls, errors too, and replies): fold all when a call is open, else open all'],
     ['f', 'the same for the diffs (Edit, Write)'],
     ['b', 'the same for the Bash output'],
     ['r', 'the same for Claude\'s replies'],
@@ -709,7 +709,6 @@ export const register: Register = on => {
     if (lines.length === 0) lines.push({ text: 'Claude has not answered this message yet.', isDim: true })
 
     const calls = lines.flatMap(line => (line.call === undefined ? [] : [line.call]))
-    const hasCalls = calls.some(call => call.kind !== 'text')
     const cursor = Math.min(await read($, cursorItem), Math.max(0, items.length - 1))
     const cursorCall = lines.find(line => line.item === cursor && line.call !== undefined)?.call
     itemRows = []
@@ -755,8 +754,11 @@ export const register: Register = on => {
     const scroll = (by: number) => () => update($, scrollRows, was => scrolledBy(was, by))
     // One lowercase key each, so a key toggles: fold while any is open, else open.
     const foldAll = (kind?: CallKind) => async () => {
-      const group = calls.filter(call => (kind === undefined ? call.kind !== 'text' : call.kind === kind))
-      const isUnfolded = !group.some(call => call.isUnfolded)
+      const group = calls.filter(call => kind === undefined || call.kind === kind)
+      // `a` goes by the tool calls where there are any: a reply starts open,
+      // and would have the first press fold where it is meant to open.
+      const tools = kind === undefined ? group.filter(call => call.kind !== 'text') : []
+      const isUnfolded = !(tools.length > 0 ? tools : group).some(call => call.isUnfolded)
       for (const call of group) await update($, { ...turnOpen, id: call.id }, () => isUnfolded)
     }
     const hasKind = (kind: CallKind) => calls.some(call => call.kind === kind)
@@ -840,7 +842,7 @@ export const register: Register = on => {
             {isCleanView ? 'full' : 'clean'}
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
-          <Button key="foldAll" hotkey="a" plain dimColor={!hasCalls} onPress={foldAll()}>
+          <Button key="foldAll" hotkey="a" plain dimColor={calls.length === 0} onPress={foldAll()}>
             all
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />

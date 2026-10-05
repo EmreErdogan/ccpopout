@@ -234,11 +234,11 @@ test('the pane folds a reply of several rows to its first ones', async ($, on) =
   expect(await ui.find({ text: /Second paragraph\. · 5 lines/ })).toBeDefined()
   await ui.press({ key: 'foldReplies' })
   expect(await ui.find({ text: /Third paragraph/ })).toBeDefined()
-  // The key for the tool calls leaves replies as they are.
-  await ui.press({ key: 'foldReplies' })
+  // The key for everything takes the replies too.
   await ui.press({ key: 'foldAll' })
   expect(await ui.find({ text: /Third paragraph/ })).toBeUndefined()
-  await ui.press({ key: 'foldReplies' })
+  await ui.press({ key: 'foldAll' })
+  expect(await ui.find({ text: /Third paragraph/ })).toBeDefined()
   await ui.unmount()
 
   // Above the prompt, where rows are few, a folded reply keeps one.

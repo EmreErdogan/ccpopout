@@ -809,10 +809,10 @@ const HELP = [
     ['wheel', 'three rows'],
   ]],
   ['All at once', [
-    ['a   A', 'open, fold every tool call (errors too)'],
+    ['a   A', 'open, fold everything: tool calls (errors too), replies, thinking'],
     ['f   F', 'open, fold the diffs (Edit, Write)'],
     ['b   B', 'open, fold the Bash output'],
-    ['r   R', 'open, fold Claude\'s replies'],
+    ['r   R', 'open, fold Claude\'s replies and thinking'],
     ['z', 'clean view: hide the tool calls, or show them again'],
     ['t', 'hide Claude\'s thinking (💭) between the calls, or show it again'],
   ]],
@@ -1124,10 +1124,10 @@ class View {
     return true
   }
 
-  /** Opens or folds every call of the turn, or those of one kind. */
+  /** Opens or folds everything of the turn that folds (calls, replies, thinking), or what is of one kind. */
   foldAll(isUnfolded, kind) {
     for (const call of this.foldable()) {
-      if (kind === undefined ? call.kind !== 'text' : call.kind === kind) this.folds.set(call.id, isUnfolded)
+      if (kind === undefined || call.kind === kind) this.folds.set(call.id, isUnfolded)
     }
     this.rows = undefined
   }

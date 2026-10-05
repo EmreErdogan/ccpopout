@@ -123,10 +123,10 @@ drawn in dim italics.
 | Scroll a row | `k` / `j`, wheel | `k` / `j`, wheel |
 | Scroll a page | `u` / `d`, `PgUp` / `PgDn`, `space` | `u` / `d` |
 | Top / bottom | `g` / `G` (`G` also follows new output) | |
-| Open / fold every tool call | `a` / `A` | `a` (toggles) |
+| Open / fold everything: tool calls, replies, thinking | `a` / `A` | `a` (toggles) |
 | Open / fold the diffs | `f` / `F` | `f` (toggles) |
 | Open / fold the Bash output | `b` / `B` | `b` (toggles) |
-| Open / fold Claude's replies | `r` / `R` | `r` (toggles) |
+| Open / fold Claude's replies and thinking | `r` / `R` | `r` (toggles) |
 | Clean view: hide the tool calls | `z` | `z` |
 | Hide / show Claude's thinking (`💭`) | `t` | |
 | Mouse off / on, to select text | `m` | |

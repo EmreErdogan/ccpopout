@@ -51,6 +51,8 @@ const S = {
   cyan: '36',
   gray: '90',
   tool: '94',
+  /** A gray of its own: the theme's (`gray`) is too faint to read a time in. */
+  stamp: '38;5;245',
   headerBg: '48;5;237',
   addBg: '48;5;22',
   delBg: '48;5;52',
@@ -196,6 +198,23 @@ function cutSegs(segs, width) {
 }
 
 const segsWidth = segs => segs.reduce((sum, seg) => sum + textWidth(seg.t), 0)
+
+/** When a transcript record was written, as the clock on the wall here read; '' for none. */
+function stampText(time) {
+  if (typeof time !== 'number' || Number.isNaN(time)) return ''
+  const at = new Date(time)
+  return [at.getHours(), at.getMinutes(), at.getSeconds()].map(part => String(part).padStart(2, '0')).join(':')
+}
+
+/** The cells a stamp takes at a row's right edge, the gap before it counted. */
+const stampRoom = stamp => (stamp === '' ? 0 : stamp.length + 2)
+
+/** `segs` with `stamp` at the right edge of a row `width` cells wide; undefined where it does not fit. */
+function stamped(segs, stamp, width) {
+  const gap = width - segsWidth(segs) - stamp.length
+  if (gap < 2) return undefined
+  return [...segs, { t: ' '.repeat(gap), s: '' }, { t: stamp, s: S.stamp }]
+}
 
 const splitCells = line =>
   line
@@ -477,18 +496,21 @@ const callKind = call => (DIFF_TOOLS.has(call.tool) ? 'diff' : call.tool === 'Ba
 /** A tool call as rows: its summary, and beneath it the result when unfolded. */
 function callRows(call, stored, width) {
   const label = callLabel(call)
+  const stamp = stampText(call.time)
   // Set apart from Claude's prose by color: the tool's name in the tool
   // color, its argument and summary gray; red throughout for an error.
   const summaryRow = (mark, tail, isUnfolded, isError = false) => {
-    const fitted = fitLabel(label, tail, width)
+    const fitted = fitLabel(label, tail, width - stampRoom(stamp))
     const name = fitted.startsWith(call.tool) ? call.tool : ''
     const tone = isError ? S.red : S.tool
     const rest = isError ? S.red : S.gray
-    return [
+    const segs = [
       { t: `${mark} `, s: tone },
       { t: name, s: sgr(tone, isUnfolded ? S.bold : '') },
       { t: `${fitted.slice(name.length)} · ${tail}`, s: rest },
     ]
+    // When it was called, at the row's end.
+    return stamp === '' ? segs : (stamped(segs, stamp, width) ?? segs)
   }
   const head = (mark, tail, isUnfolded, isError) => ({
     segs: summaryRow(mark, tail, isUnfolded, isError),
@@ -687,20 +709,21 @@ class Transcript {
       this.seen.add(record.uuid)
     }
     const content = record.message.content
+    const time = Date.parse(record.timestamp)
 
     if (record.type === 'assistant') {
       let isChanged = false
       for (const block of Array.isArray(content) ? content : []) {
         if (block.type === 'text' && (block.text ?? '').trim() !== '') {
-          this.entries.push({ kind: 'text', text: block.text })
+          this.entries.push({ kind: 'text', text: block.text, time })
           isChanged = true
         } else if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim() !== '') {
           // What Claude notes between its tool calls: a thinking block holding
           // text. Its reasoning proper is one holding none.
-          this.entries.push({ kind: 'thinking', text: block.thinking.trimEnd() })
+          this.entries.push({ kind: 'thinking', text: block.thinking.trimEnd(), time })
           isChanged = true
         } else if (block.type === 'tool_use') {
-          const call = { kind: 'call', id: block.id, tool: block.name, input: block.input ?? {}, isAnswered: false, isError: false, text: '', result: undefined }
+          const call = { kind: 'call', id: block.id, tool: block.name, input: block.input ?? {}, isAnswered: false, isError: false, text: '', result: undefined, time }
           this.calls.set(block.id, call)
           this.entries.push(call)
           isChanged = true
@@ -970,6 +993,7 @@ class View {
         const id = `text:${first + 1 + item}`
         const isUnfolded = this.folds.get(id) ?? true
         const fold = prose.length > FOLDED_ROWS ? { id, isUnfolded, kind: 'text' } : undefined
+        const stamp = stampText(entry.time)
         if (fold !== undefined && !isUnfolded) {
           // Folded, its first rows of text stay, the last saying how much there is.
           const kept = prose.filter(line => line.segs.length > 0).slice(0, FOLDED_ROWS)
@@ -977,7 +1001,7 @@ class View {
           kept.forEach((line, at) => {
             const lead = at === 0 ? { t: foldedMark, s: S.bold } : { t: foldedPad, s: '' }
             const isLast = at === kept.length - 1
-            const segs = isLast ? [...cutSegs(line.segs, Math.max(8, width - foldedPad.length - textWidth(tail))), { t: tail, s: S.gray }] : line.segs
+            const segs = isLast ? [...cutSegs(line.segs, Math.max(8, width - foldedPad.length - textWidth(tail) - stampRoom(stamp))), { t: tail, s: S.gray }] : line.segs
             rows.push({ ...line, item, call: at === 0 ? fold : undefined, segs: [lead, ...segs] })
           })
         } else {
@@ -985,6 +1009,13 @@ class View {
             const lead = at === 0 ? { t: mark, s: S.bold } : { t: pad, s: '' }
             rows.push({ ...line, item, call: at === 0 ? fold : undefined, segs: [lead, ...line.segs] })
           })
+        }
+        if (stamp !== '') {
+          // When it was written: at the end of its last row, or on one of its own.
+          const last = rows.at(-1)
+          const segs = stamped(last.segs, stamp, width)
+          if (segs !== undefined) last.segs = segs
+          else rows.push({ item, segs: stamped([], stamp, width) ?? [] })
         }
         rows.push(row())
       } else if (entry.kind === 'call') {

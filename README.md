@@ -136,6 +136,9 @@ drawn in dim italics.
 The in-app pane has fewer keys because Claude Code lets a plugin bind only
 single lowercase letters there.
 
+In the side pane each reply and each tool call ends with the time it was
+written to the transcript, in your local time.
+
 Copying an item puts on the clipboard: a reply as Claude wrote it (Markdown), a
 Bash call as its command and output, an edit as a unified diff. The side pane
 copies with the OSC 52 escape sequence, which your terminal and multiplexer

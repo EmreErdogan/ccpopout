@@ -694,6 +694,11 @@ class Transcript {
         if (block.type === 'text' && (block.text ?? '').trim() !== '') {
           this.entries.push({ kind: 'text', text: block.text })
           isChanged = true
+        } else if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim() !== '') {
+          // What Claude notes between its tool calls: a thinking block holding
+          // text. Its reasoning proper is one holding none.
+          this.entries.push({ kind: 'thinking', text: block.thinking.trimEnd() })
+          isChanged = true
         } else if (block.type === 'tool_use') {
           const call = { kind: 'call', id: block.id, tool: block.name, input: block.input ?? {}, isAnswered: false, isError: false, text: '', result: undefined }
           this.calls.set(block.id, call)
@@ -753,6 +758,7 @@ const NAV = [
   { key: 'a', label: 'open all' },
   { key: 'A', label: 'fold all' },
   { key: 'z', label: 'clean' },
+  { key: 't', label: 'hide 💭' },
   { key: '?', label: 'help' },
   { key: 'q', label: 'close' },
 ]
@@ -784,6 +790,7 @@ const HELP = [
     ['b   B', 'open, fold the Bash output'],
     ['r   R', 'open, fold Claude\'s replies'],
     ['z', 'clean view: hide the tool calls, or show them again'],
+    ['t', 'hide Claude\'s thinking (💭) between the calls, or show it again'],
   ]],
   ['Other', [
     ['m', 'mouse off or on (off: select text to copy)'],
@@ -823,6 +830,8 @@ class View {
     this.isMouseOn = true
     /** The clean view: tool calls hidden, Claude's words alone. */
     this.isClean = false
+    /** Claude's thinking between its tool calls left out. */
+    this.isThinkingHidden = false
     this.folds = new Map()
     /** The item under the cursor: its place among the turn's entries after the prompt. */
     this.cursor = 0
@@ -943,12 +952,21 @@ class View {
     }
     rest.forEach((entry, item) => {
       if (entry.kind === 'call' && this.isClean) return hidden.push(entry)
+      if (entry.kind === 'thinking' && this.isThinkingHidden) return
       flush()
-      if (entry.kind === 'text') {
+      if (entry.kind === 'text' || entry.kind === 'thinking') {
         if (rows.length > 0 && rows.at(-1).segs.length > 0) rows.push(row())
         // Claude's own words: a bullet on the first row, the rest under it.
         // A reply of several rows folds to its first, as a call does.
-        const prose = proseRows(entry.text, width - 2)
+        // Its thinking is set apart: a thought bubble for the bullet, dim italics.
+        const isThinking = entry.kind === 'thinking'
+        const mark = isThinking ? '💭 ' : '● '
+        const pad = ' '.repeat(textWidth(mark))
+        // Folded, the bubble stays beside the fold's mark: the rows leave room for both.
+        const foldedMark = isThinking ? `▸ ${mark}` : '▸ '
+        const foldedPad = ' '.repeat(textWidth(foldedMark))
+        let prose = proseRows(entry.text, width - foldedPad.length)
+        if (isThinking) prose = prose.map(line => ({ ...line, segs: line.segs.map(seg => ({ ...seg, s: sgr(S.dim, S.italic, seg.s) })) }))
         const id = `text:${first + 1 + item}`
         const isUnfolded = this.folds.get(id) ?? true
         const fold = prose.length > FOLDED_ROWS ? { id, isUnfolded, kind: 'text' } : undefined
@@ -957,14 +975,14 @@ class View {
           const kept = prose.filter(line => line.segs.length > 0).slice(0, FOLDED_ROWS)
           const tail = ` · ${prose.length} lines`
           kept.forEach((line, at) => {
-            const lead = at === 0 ? { t: '▸ ', s: S.bold } : { t: '  ', s: '' }
+            const lead = at === 0 ? { t: foldedMark, s: S.bold } : { t: foldedPad, s: '' }
             const isLast = at === kept.length - 1
-            const segs = isLast ? [...cutSegs(line.segs, Math.max(8, width - 2 - textWidth(tail))), { t: tail, s: S.gray }] : line.segs
+            const segs = isLast ? [...cutSegs(line.segs, Math.max(8, width - foldedPad.length - textWidth(tail))), { t: tail, s: S.gray }] : line.segs
             rows.push({ ...line, item, call: at === 0 ? fold : undefined, segs: [lead, ...segs] })
           })
         } else {
           prose.forEach((line, at) => {
-            const lead = at === 0 ? { t: '● ', s: S.bold } : { t: '  ', s: '' }
+            const lead = at === 0 ? { t: mark, s: S.bold } : { t: pad, s: '' }
             rows.push({ ...line, item, call: at === 0 ? fold : undefined, segs: [lead, ...line.segs] })
           })
         }
@@ -1017,6 +1035,14 @@ class View {
     else if (last >= scroll + this.windowRows) this.scroll = Math.min(first, last - this.windowRows + 1)
     else return
     this.isFollowing = false
+  }
+
+  /** After items were hidden or shown: a cursor on one now hidden comes to the item after it, or the last. */
+  settle() {
+    this.rows = undefined
+    const items = [...new Set(this.build().flatMap(line => (line.item === undefined ? [] : [line.item])))]
+    if (!items.includes(this.cursor)) this.cursor = items.find(item => item > this.cursor) ?? items.at(-1) ?? 0
+    this.reveal()
   }
 
   /** Moves the cursor an item up or down. */
@@ -1102,14 +1128,12 @@ class View {
         return this.fold(false)
       case 'c':
         return this.copy()
-      case 'z': {
+      case 'z':
         this.isClean = !this.isClean
-        this.rows = undefined
-        // A cursor on a call now hidden comes to the reply after it, or the last.
-        const items = [...new Set(this.build().flatMap(line => (line.item === undefined ? [] : [line.item])))]
-        if (!items.includes(this.cursor)) this.cursor = items.find(item => item > this.cursor) ?? items.at(-1) ?? 0
-        return this.reveal()
-      }
+        return this.settle()
+      case 't':
+        this.isThinkingHidden = !this.isThinkingHidden
+        return this.settle()
       case 'e':
         this.isExpanded = !this.isExpanded
         this.scroll = 0
@@ -1192,7 +1216,8 @@ class View {
     let nav = ''
     let used = 1
     for (const item of NAV) {
-      const label = item.key === 'e' && this.isExpanded ? 'collapse' : item.key === 'z' && this.isClean ? 'full' : item.label
+      const label =
+        item.key === 'e' && this.isExpanded ? 'collapse' : item.key === 'z' && this.isClean ? 'full' : item.key === 't' && this.isThinkingHidden ? 'show 💭' : item.label
       const cells = textWidth(item.key) + 1 + textWidth(label)
       if (used + cells + 2 > width) break
       this.hits.push({ key: item.key, from: used + 1, to: used + 1 + cells })

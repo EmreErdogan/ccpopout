@@ -8,7 +8,7 @@ messages and see what Claude did since, with every tool call folded to one line
 until you open it.
 
 ```
- p ◂ older  n newer ▸  e expand  a open all  A fold all  z clean  ? help  q close
+ p ◂ older  n newer ▸  e expand  a open all  A fold all  z clean  t hide 💭  ? help  q close
 
  7/12 › the header disappears when I scroll to the bottom
 ──────────────────────────────────────────────────────────────── top · ↓ 31 ──
@@ -109,7 +109,9 @@ keyboard at the prompt. Press `ctrl+x tab` to hand it to the pane.
 ## Keys
 
 The cursor (`▌`) moves over the items of a turn: each reply of Claude's and
-each tool call.
+each tool call. In the side pane, what Claude notes between its tool calls
+(its thinking, as the transcript records it) is an item too, marked `💭` and
+drawn in dim italics.
 
 | | Side pane | In-app pane |
 | --- | --- | --- |
@@ -126,6 +128,7 @@ each tool call.
 | Open / fold the Bash output | `b` / `B` | `b` (toggles) |
 | Open / fold Claude's replies | `r` / `R` | `r` (toggles) |
 | Clean view: hide the tool calls | `z` | `z` |
+| Hide / show Claude's thinking (`💭`) | `t` | |
 | Mouse off / on, to select text | `m` | |
 | Help | `?` or `h` | `h` |
 | Close | `q` or `esc` | `q` or `esc` |

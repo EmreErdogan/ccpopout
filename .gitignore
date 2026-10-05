@@ -1,0 +1,3 @@
+# Written by Claude Code when it loads the plugin: the API types the tsconfig extends.
+.claude-plugin/types/
+node_modules/

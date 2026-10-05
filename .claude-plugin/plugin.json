@@ -1,0 +1,14 @@
+{
+  "name": "ccpopout",
+  "version": "0.1.0",
+  "description": "Read a Claude Code session one message at a time: what Claude did since each of your messages, in a pane or a side terminal",
+  "author": {
+    "name": "EmreErdogan",
+    "url": "https://github.com/EmreErdogan"
+  },
+  "homepage": "https://github.com/EmreErdogan/ccpopout",
+  "repository": "https://github.com/EmreErdogan/ccpopout",
+  "license": "MIT",
+  "keywords": ["session", "transcript", "reader", "tui", "tmux", "herdr"],
+  "types": "./types/index.d.ts"
+}

@@ -39,17 +39,39 @@ It comes in two forms that behave the same:
 
 ## Install
 
+From inside Claude Code:
+
+```
+/plugin marketplace add EmreErdogan/ccpopout
+/plugin install ccpopout@ccpopout
+```
+
+Or from a shell:
+
 ```sh
 claude plugin marketplace add EmreErdogan/ccpopout
 claude plugin install ccpopout@ccpopout
 ```
 
-Restart Claude Code afterwards. To update later:
+Restart Claude Code afterwards.
+
+### Update
+
+From inside Claude Code, refresh the marketplace and then update the plugin
+from the `/plugin` menu:
+
+```
+/plugin marketplace update ccpopout
+```
+
+Or from a shell:
 
 ```sh
 claude plugin marketplace update ccpopout
 claude plugin update ccpopout@ccpopout
 ```
+
+Restart Claude Code to apply an update.
 
 ## Commands
 

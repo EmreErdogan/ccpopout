@@ -53,7 +53,8 @@ claude plugin marketplace add EmreErdogan/ccpopout
 claude plugin install ccpopout@ccpopout
 ```
 
-Restart Claude Code afterwards.
+If a session that was already open answers `Unknown command: /popout`, run
+`/reload-plugins` there, or start a new session.
 
 ### Update
 
@@ -71,7 +72,8 @@ claude plugin marketplace update ccpopout
 claude plugin update ccpopout@ccpopout
 ```
 
-Restart Claude Code to apply an update.
+If an open session still shows the old version, run `/reload-plugins` there,
+or start a new session.
 
 ## Commands
 

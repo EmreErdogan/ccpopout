@@ -372,6 +372,19 @@ async function refocus($: EngineInterface): Promise<void> {
   }
 }
 
+/** The plugin's version off its manifest, read once; '' when it cannot be read. */
+let version: string | undefined
+async function pluginVersion($: EngineInterface): Promise<string> {
+  if (version !== undefined) return version
+  let read = ''
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    if (typeof manifest.version === 'string') read = manifest.version
+  } catch {}
+  version = read
+  return read
+}
+
 /** A reply or a call as plain text for the clipboard: prose as written, a call with its result. */
 function copyText(entry: string | ToolUseSummary): string {
   if (typeof entry === 'string') return entry
@@ -759,7 +772,7 @@ export const register: Register = on => {
       const last = titles[titleMost - 1] ?? ''
       titles[titleMost - 1] = `${last.length > width - 2 ? last.slice(0, width - 2) : last} …`
     }
-    if (isHelp) titles = ['Keys · h, q or esc returns']
+    if (isHelp) titles = [`${`ccpopout ${await pluginVersion($)}`.trimEnd()} · Keys · h, q or esc returns`]
 
     // A blank row between the keys and the message, where there is height.
     const gapRows = e.props.placement === 'dock' && screenRows >= ROOMY_ROWS ? 1 : 0

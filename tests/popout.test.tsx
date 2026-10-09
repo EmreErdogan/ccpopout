@@ -140,6 +140,7 @@ test('the pane keeps its header and scrolls the body beneath it', async ($, on) 
 test('the pane folds and opens every call, or one kind, and shows its keys', async ($, on) => {
   on('session.messages', () => ({ value: CONVERSATION }))
   on('ui.scroll', () => ({}))
+  on('fs.read', (_$, e) => ({ value: e.path.endsWith('/.claude-plugin/plugin.json') ? '{ "version": "9.8.7" }' : '' }))
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -165,7 +166,7 @@ test('the pane folds and opens every call, or one kind, and shows its keys', asy
     expect(await marks()).toBe('▾▾▾')
 
     await ui.press({ key: 'help' })
-    expect(await ui.find({ text: /Keys · h, q or esc returns/ })).toBeDefined()
+    expect(await ui.find({ text: /ccpopout 9\.8\.7 · Keys · h, q or esc returns/ })).toBeDefined()
     expect(await ui.find({ text: /the same for the diffs/ })).toBeDefined()
     expect(await ui.find({ text: /Editing now/ })).toBeUndefined()
     await ui.press({ key: 'help' })

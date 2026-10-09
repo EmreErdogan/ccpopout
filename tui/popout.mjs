@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const POLL_MS = 200
 const MAX_TEXT = 200000
@@ -836,6 +837,19 @@ const HELP = [
   ]],
 ]
 
+/** The plugin's version off its manifest; '' when it cannot be read. */
+function pluginVersion() {
+  try {
+    const manifest = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.claude-plugin', 'plugin.json')
+    const { version } = JSON.parse(fs.readFileSync(manifest, 'utf8'))
+    return typeof version === 'string' ? version : ''
+  } catch {
+    return ''
+  }
+}
+
+const VERSION = pluginVersion()
+
 function helpRows(width) {
   const keys = Math.max(...HELP.flatMap(([, items]) => items.map(([key]) => textWidth(key))))
   const rows = []
@@ -906,7 +920,7 @@ class View {
   /** The message as the header shows it: its first rows, marked when cut. */
   titleRows() {
     const width = this.columns - 2
-    if (this.isHelp) return ['Keys · any key returns']
+    if (this.isHelp) return [`${`ccpopout ${VERSION}`.trimEnd()} · Keys · any key returns`]
     const prompt = this.entries()[0]
     if (prompt === undefined) {
       return [this.transcript.file === undefined ? 'Waiting for the session to write its transcript…' : 'No messages yet.']
@@ -1420,6 +1434,7 @@ function parseArgs(argv) {
     else if (argv[at] === '--clean') args.isClean = true
     else if (argv[at] === '--cwd') args.cwd = argv[++at]
     else if (argv[at] === '--help' || argv[at] === '-h') args.isHelp = true
+    else if (argv[at] === '--version') args.isVersion = true
     else args.file = argv[at]
   }
   return args
@@ -1427,6 +1442,10 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
+  if (args.isVersion) {
+    process.stdout.write(`ccpopout ${VERSION}\n`)
+    process.exit(0)
+  }
   if (args.isHelp || (args.file === undefined && args.session === undefined)) {
     process.stderr.write('usage: popout.mjs <transcript.jsonl> | --session <id> [--cwd <dir>] [--snapshot <messages.json>] [--clean]\n')
     process.exit(args.isHelp ? 0 : 2)

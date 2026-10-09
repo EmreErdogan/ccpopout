@@ -919,6 +919,8 @@ class View {
     /** Where the mouse was last, and what of the header it was over when last drawn. */
     this.pointer = undefined
     this.hovered = ''
+    /** The row the window started at when the turn was last drawn. */
+    this.drawnScroll = 0
     /** Where the button went down, until it is let go. */
     this.pressed = undefined
     /** A drag's two ends in screen cells, from 1: where it began, where the mouse is. */
@@ -1246,11 +1248,13 @@ class View {
       case 'home':
         this.isFollowing = false
         this.scroll = 0
+        this.cursor = this.build().find(line => line.item !== undefined)?.item ?? 0
         return
       case 'G':
       case 'end':
         this.isFollowing = true
         this.scroll = this.maxScroll
+        this.cursor = this.build().findLast(line => line.item !== undefined)?.item ?? 0
         return
       case 'enter':
       case 'o':
@@ -1366,6 +1370,13 @@ class View {
     if (this.isFollowing) this.scroll = max
     this.scroll = Math.max(0, Math.min(max, this.scroll))
     const shown = rows.slice(this.scroll, this.scroll + this.windowRows)
+    // A cursor the window left out of sight comes to the nearest item still in
+    // it: the top one going down, the bottom one going up.
+    if (!this.isHelp && !shown.some(line => line.item === this.cursor)) {
+      const near = (this.scroll >= this.drawnScroll ? shown : shown.toReversed()).find(line => line.item !== undefined)
+      if (near !== undefined) this.cursor = near.item
+    }
+    if (!this.isHelp) this.drawnScroll = this.scroll
     const frame = []
 
     // Row 1: the keys, each a press target.

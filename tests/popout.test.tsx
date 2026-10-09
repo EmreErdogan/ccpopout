@@ -178,6 +178,43 @@ test('the pane folds and opens every call, or one kind, and shows its keys', asy
   }
 })
 
+test('a cursor the window leaves out of sight comes to the nearest item in it', async ($, on) => {
+  on('session.messages', () => ({ value: CONVERSATION }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } as never }
+  })
+
+  // Six rows: three of header, three of body.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 6 } } })
+  // A row down takes the first reply out of sight: the cursor comes to the Edit.
+  await ui.press({ key: 'down' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toContain('--- /x/a.ts')
+  // A row back up, and the Edit is still in sight: the cursor stays on it.
+  await ui.press({ key: 'up' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toContain('--- /x/a.ts')
+
+  // To the end: the failed Bash call is the top item there.
+  await ui.press({ key: 'pageDown' })
+  await ui.press({ key: 'pageDown' })
+  await ui.press({ key: 'pageDown' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ false\nBOOM')
+
+  // Back to the top: the cursor leaves at the bottom, and ends on the Edit.
+  await ui.press({ key: 'pageUp' })
+  await ui.press({ key: 'pageUp' })
+  await ui.press({ key: 'pageUp' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toContain('--- /x/a.ts')
+  await ui.unmount()
+})
+
 test('the pane moves a cursor over the items, opens the one it is on and copies it', async ($, on) => {
   on('session.messages', () => ({ value: CONVERSATION }))
   on('clock.sleep', () => ({ value: undefined }))

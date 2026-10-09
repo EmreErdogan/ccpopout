@@ -344,6 +344,21 @@ function scrolledBy(was: number, by: number): number {
   return Math.max(0, Math.min(maxScroll, Math.min(was, maxScroll) + by))
 }
 
+/**
+ * Moves the window `by` rows over the turn last drawn. A cursor it leaves out
+ * of sight comes to the nearest item still in it: the top one going down, the
+ * bottom one going up.
+ */
+async function scrollWindow($: EngineInterface, by: number): Promise<void> {
+  const to = scrolledBy(await read($, scrollRows), by)
+  await update($, scrollRows, () => to)
+  const shown = itemRows.filter(rows => rows.last >= to && rows.first < to + windowRows)
+  const cursor = await read($, cursorItem)
+  if (shown.some(rows => rows.item === cursor)) return
+  const near = by > 0 ? shown[0] : shown.at(-1)
+  if (near !== undefined) await update($, cursorItem, () => near.item)
+}
+
 /** Keeps the open pane current as the conversation grows. */
 async function refresh($: EngineInterface): Promise<void> {
   if ((await $.ui.panes()).some(pane => pane.id === PANE)) $.ui.invalidate('ui.render')
@@ -631,7 +646,7 @@ export const register: Register = on => {
     const isArrow = e.origin.kind === 'person' && e.pointer === undefined && Math.abs(e.by) === 1
     if (isPinning) return next({ ...e, offset: PIN })
     if (isArrow && !(await read($, isHelpShown))) await moveCursor($, e.by)
-    else await update($, scrollRows, was => scrolledBy(was, e.by))
+    else await scrollWindow($, e.by)
     return next({ ...e, offset: PIN })
   })
 
@@ -790,7 +805,7 @@ export const register: Register = on => {
       await update($, cursorItem, () => 0)
       await update($, isHelpShown, () => false)
     }
-    const scroll = (by: number) => () => update($, scrollRows, was => scrolledBy(was, by))
+    const scroll = (by: number) => () => scrollWindow($, by)
     // One lowercase key each, so a key toggles: fold while any is open, else open.
     const foldAll = (kind?: CallKind) => async () => {
       const group = calls.filter(call => kind === undefined || call.kind === kind)

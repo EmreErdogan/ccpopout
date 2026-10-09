@@ -140,6 +140,10 @@ drawn in gray italics.
 The in-app pane has fewer keys because Claude Code lets a plugin bind only
 single lowercase letters there.
 
+The cursor (`▌`) stays in sight: when scrolling takes its item off the screen
+it comes to the nearest one still there, the top item going down and the bottom
+one going up. `g` and `G` take it to the first and the last item.
+
 In the side pane each reply and each tool call ends with the time it was
 written to the transcript, in your local time. The keys in the header (and the
 message under them, which `e` expands) light up under the mouse.

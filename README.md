@@ -152,7 +152,9 @@ and `t` pressed again with nothing done between return exactly to where the
 turn was, and so does closing the whole message (`e`) or the help.
 
 In the side pane each reply and each tool call ends with the time it was
-written to the transcript, in your local time. The keys in the header (and the
+written to the transcript, in your local time. In the clean view the row
+standing for a run of hidden tool calls ends with the time of its first and of
+its last. The keys in the header (and the
 message under them, which `e` expands) light up under the mouse.
 
 Copying an item puts on the clipboard: a reply as Claude wrote it (Markdown), a

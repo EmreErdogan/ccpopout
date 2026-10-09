@@ -508,7 +508,13 @@ function hiddenRow(calls, width) {
   const errors = calls.filter(call => call.isError).length
   const text = `⋯ ${calls.length} tool ${calls.length === 1 ? 'call' : 'calls'} · ${tools}`
   const tail = errors === 0 ? '' : ` · ${errors} ${errors === 1 ? 'error' : 'errors'}`
-  return { segs: [{ t: truncate(text, Math.max(8, width - textWidth(tail))), s: S.gray }, ...(tail === '' ? [] : [{ t: tail, s: S.red }])] }
+  // When the hidden calls were made: the first's time to the last's, at the edge.
+  const times = calls.map(call => stampText(call.time)).filter(stamp => stamp !== '')
+  const stamp = times.length === 0 ? '' : times[0] === times.at(-1) ? times[0] : `${times[0]}–${times.at(-1)}`
+  const segs = room => [{ t: truncate(text, Math.max(8, room)), s: S.gray }, ...(tail === '' ? [] : [{ t: tail, s: S.red }])]
+  // Where the times do not fit beside the count, the row is the count alone.
+  const timed = stamp === '' ? undefined : stamped(segs(width - textWidth(tail) - stampRoom(stamp)), stamp, width)
+  return { segs: timed ?? segs(width - textWidth(tail)) }
 }
 
 const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])

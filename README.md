@@ -124,7 +124,7 @@ drawn in gray italics.
 | Open / fold the item | `→` / `←`, `o`, `enter`, click | `o`, click |
 | Copy the item | `c` | `c` |
 | Scroll a row | `k` / `j`, wheel | `k` / `j`, wheel |
-| Scroll a page | `u` / `d`, `PgUp` / `PgDn`, `space` | `u` / `d` |
+| Scroll a page | `K` / `J`, `u` / `d`, `PgUp` / `PgDn`, `space` | `u` / `d` |
 | Top / bottom | `g` / `G` (`G` also follows new output) | |
 | Open / fold everything: tool calls, replies, thinking | `a` / `A` | `a` (toggles) |
 | Open / fold the diffs | `f` / `F` | `f` (toggles) |

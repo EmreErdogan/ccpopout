@@ -843,8 +843,8 @@ const HELP = [
   ]],
   ['Scrolling', [
     ['k   j', 'one row up, down'],
-    ['u  PgUp', 'one page up'],
-    ['d  PgDn  space', 'one page down'],
+    ['K  u  PgUp', 'one page up'],
+    ['J  d  PgDn  space', 'one page down'],
     ['g  Home', 'top'],
     ['G  End', 'bottom, and follow new output'],
     ['wheel', 'three rows'],
@@ -892,7 +892,7 @@ function helpRows(width) {
   return rows
 }
 
-const SCROLL_KEYS = new Set(['k', 'up', 'j', 'down', 'u', 'pageup', 'd', 'space', 'pagedown', 'g', 'home', 'G', 'end', 'm'])
+const SCROLL_KEYS = new Set(['k', 'up', 'j', 'down', 'u', 'K', 'pageup', 'd', 'J', 'space', 'pagedown', 'g', 'home', 'G', 'end', 'm'])
 
 class View {
   constructor(transcript, out) {
@@ -1297,9 +1297,11 @@ class View {
       case 'j':
         return this.scrollBy(1)
       case 'u':
+      case 'K':
       case 'pageup':
         return this.scrollBy(-page)
       case 'd':
+      case 'J':
       case 'space':
       case 'pagedown':
         return this.scrollBy(page)

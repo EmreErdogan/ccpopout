@@ -80,6 +80,27 @@ function textWidth(text) {
   return width
 }
 
+/** The characters of `text` in the cells from `from` up to `to`, and the cell the first of them is in. */
+function cellSlice(text, from, to) {
+  let out = ''
+  let col = 0
+  let start
+  for (const ch of text) {
+    if (col >= to) break
+    if (col >= from) {
+      start ??= col
+      out += ch
+    }
+    col += charWidth(ch)
+  }
+  return { text: out, start: start ?? from }
+}
+
+/** A drawn row as the text on screen: no escapes, and not the scroll bar at its edge. */
+function plainOf(line) {
+  return line.split(/\x1b\[\d+G/)[0].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+}
+
 /** `text` cut to at most `width` cells, with an ellipsis when it was longer. */
 function truncate(text, width) {
   if (textWidth(text) <= width) return text
@@ -812,6 +833,7 @@ const HELP = [
     ['o  enter', 'open or fold the item'],
     ['c', 'copy the item (a call: its command or diff, and output)'],
     ['click', 'pick the item; on its first row, open or fold it'],
+    ['drag', 'select text: copied when the button is let go'],
   ]],
   ['Scrolling', [
     ['k   j', 'one row up, down'],
@@ -830,7 +852,7 @@ const HELP = [
     ['t', 'hide Claude\'s thinking (💭) between the calls, or show it again'],
   ]],
   ['Other', [
-    ['m', 'mouse off or on (off: select text to copy)'],
+    ['m', 'mouse off or on (off: the terminal\'s own selection)'],
     ['ctrl+l', 'redraw'],
     ['?  h', 'this help'],
     ['q  esc', 'close'],
@@ -897,6 +919,12 @@ class View {
     /** Where the mouse was last, and what of the header it was over when last drawn. */
     this.pointer = undefined
     this.hovered = ''
+    /** Where the button went down, until it is let go. */
+    this.pressed = undefined
+    /** A drag's two ends in screen cells, from 1: where it began, where the mouse is. */
+    this.selection = undefined
+    /** The rows last drawn as text, each with the cells on its left a selection leaves out. */
+    this.plain = []
   }
 
   get columns() {
@@ -1136,7 +1164,10 @@ class View {
   copy() {
     const entry = this.entries()[this.cursor + 1]
     if (entry === undefined || this.isHelp) return
-    const text = copyText(entry)
+    this.copied(copyText(entry))
+  }
+
+  copied(text) {
     copyToClipboard(this.out, text)
     const lines = text.split('\n').length
     this.notice = ` copied · ${lines} ${lines === 1 ? 'line' : 'lines'} `
@@ -1264,6 +1295,55 @@ class View {
     return this.over() !== this.hovered
   }
 
+  /** The cells of screen row `y` the selection covers, from 0 and up to; undefined for none. */
+  span(y) {
+    const drag = this.selection
+    if (drag === undefined) return undefined
+    const isForward = drag.from.y < drag.to.y || (drag.from.y === drag.to.y && drag.from.x <= drag.to.x)
+    const [first, last] = isForward ? [drag.from, drag.to] : [drag.to, drag.from]
+    const row = this.plain[y - 1]
+    if (row === undefined || y < first.y || y > last.y) return undefined
+    return [Math.max(row.skip, y === first.y ? first.x - 1 : 0), y === last.y ? last.x : Infinity]
+  }
+
+  /** What the selection holds, as the rows on screen read; '' for nothing. */
+  selectionText() {
+    const rows = []
+    this.plain.forEach((row, at) => {
+      const span = this.span(at + 1)
+      if (span !== undefined) rows.push(cellSlice(row.text, span[0], span[1]).text.trimEnd())
+    })
+    return rows.join('\n').trim() === '' ? '' : rows.join('\n')
+  }
+
+  /** The button went down: the keys row answers at once, the rest when it is let go. */
+  press(x, y) {
+    this.selection = undefined
+    this.pressed = undefined
+    if (y === 1) return this.click(x, y)
+    this.pressed = { x, y }
+  }
+
+  /** The mouse moved, the button held or not; true when the selection changed. */
+  drag(x, y, isHeld) {
+    if (!isHeld) this.pressed = undefined
+    if (this.pressed === undefined) return false
+    if (this.selection === undefined && x === this.pressed.x && y === this.pressed.y) return false
+    this.selection = { from: this.pressed, to: { x, y } }
+    return true
+  }
+
+  /** The button was let go: a drag is copied, a press in place is a click. */
+  release() {
+    const { pressed } = this
+    this.pressed = undefined
+    if (pressed === undefined) return
+    const text = this.selectionText()
+    if (text !== '') return this.copied(text)
+    this.selection = undefined
+    this.click(pressed.x, pressed.y)
+  }
+
   click(x, y) {
     if (y === 1) {
       const hit = this.hits.find(found => x >= found.from && x < found.to)
@@ -1331,15 +1411,25 @@ class View {
     const rule = '─'.repeat(Math.max(0, width - range.length - live.length - 2))
     frame.push(`${ESC}[${S.gray}m${rule}${ESC}[${S.tool}m${live}${range}${ESC}[${S.gray}m──${RESET}`)
 
+    const bodyAt = frame.length
     for (let at = 0; at < this.windowRows; at++) {
       const line = shown[at]
       if (this.isHelp) frame.push(`${paint(line, width - BAR)}${bar(at)}`)
       else frame.push(`${RESET}${line?.item === this.cursor ? `${ESC}[${S.cyan}m▌ ` : '  '}${paint(line, width - GUTTER - BAR)}${bar(at)}`)
     }
 
+    // A selection leaves out the cursor's cells beside the turn's rows.
+    this.plain = frame.map((line, at) => ({ text: plainOf(line), skip: at >= bodyAt && !this.isHelp ? GUTTER : 0 }))
     let text = `${ESC}[?2026h`
     frame.forEach((line, at) => {
       text += `${ESC}[${at + 1};1H${line}`
+    })
+    // The selection, drawn over its rows in reverse.
+    this.plain.forEach((row, at) => {
+      const span = this.span(at + 1)
+      if (span === undefined) return
+      const cut = cellSlice(row.text, span[0], span[1])
+      if (cut.text !== '') text += `${ESC}[${at + 1};${cut.start + 1}H${ESC}[${S.inverse}m${cut.text}${RESET}`
     })
     this.out.write(`${text}${ESC}[?2026l`)
     this.hovered = this.over()
@@ -1489,17 +1579,24 @@ function main() {
     let isDirty = false
     for (const event of parseInput(chunk)) {
       if (event.mouse !== undefined && (event.mouse.button & 32) !== 0) {
-        // A move: drawn only when it changes what the mouse is over.
-        if (view.point(event.mouse.x, event.mouse.y)) isDirty = true
+        // A move: drawn only when it changes what the mouse is over, or selects.
+        const isOver = view.point(event.mouse.x, event.mouse.y)
+        if (view.drag(event.mouse.x, event.mouse.y, (event.mouse.button & 3) === 0) || isOver) isDirty = true
         continue
       }
       isDirty = true
       if (event.mouse !== undefined) {
         const { button, x, y, isDown } = event.mouse
         view.point(x, y)
-        if (button === 64) view.scrollBy(-WHEEL_ROWS)
-        else if (button === 65) view.scrollBy(WHEEL_ROWS)
-        else if (button === 0 && isDown) view.click(x, y)
+        if (button === 0 && isDown) view.press(x, y)
+        else if (button === 0) view.release()
+        else {
+          // The rows move under a selection: it is let go.
+          view.selection = undefined
+          view.pressed = undefined
+          if (button === 64) view.scrollBy(-WHEEL_ROWS)
+          else if (button === 65) view.scrollBy(WHEEL_ROWS)
+        }
       } else if (event.key === 'ctrl+c' || event.key === 'ctrl+d') {
         return close(0)
       } else if ((event.key === 'q' || event.key === 'escape') && !view.isHelp) {
@@ -1507,6 +1604,7 @@ function main() {
       } else if (event.key === 'ctrl+l') {
         process.stdout.write(`${ESC}[2J`)
       } else {
+        view.selection = undefined
         view.key(event.key)
       }
     }
@@ -1514,6 +1612,7 @@ function main() {
   })
   process.stdout.on('resize', () => {
     view.rows = undefined
+    view.selection = undefined
     process.stdout.write(`${ESC}[2J`)
     view.draw()
   })
@@ -1526,7 +1625,10 @@ function main() {
 
   setInterval(() => {
     const isChanged = transcript.poll()
-    if (isChanged) view.changed()
+    if (isChanged) {
+      view.changed()
+      view.selection = undefined
+    }
     if (isChanged || view.expire()) view.draw()
   }, POLL_MS)
 

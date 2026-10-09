@@ -132,7 +132,8 @@ drawn in gray italics.
 | Open / fold Claude's replies and thinking | `r` / `R` | `r` (toggles) |
 | Clean view: hide the tool calls | `z` | `z` |
 | Hide / show Claude's thinking (`💭`) | `t` | |
-| Mouse off / on, to select text | `m` | |
+| Select text, copied when the button is let go | drag | |
+| Mouse off / on, for the terminal's own selection | `m` | |
 | Help | `?` or `h` | `h` |
 | Close | `q` or `esc` | `q` or `esc` |
 
@@ -144,9 +145,10 @@ written to the transcript, in your local time. The keys in the header (and the
 message under them, which `e` expands) light up under the mouse.
 
 Copying an item puts on the clipboard: a reply as Claude wrote it (Markdown), a
-Bash call as its command and output, an edit as a unified diff. The side pane
-copies with the OSC 52 escape sequence, which your terminal and multiplexer
-must allow.
+Bash call as its command and output, an edit as a unified diff. Dragging the
+mouse in the side pane selects text as the rows on screen read, and copies it
+when the button is let go. The side pane copies with the OSC 52 escape
+sequence, which your terminal and multiplexer must allow.
 
 ## Notes and limits
 

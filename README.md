@@ -154,7 +154,10 @@ turn was, and so does closing the whole message (`e`) or the help.
 In the side pane each reply and each tool call ends with the time it was
 written to the transcript, in your local time. In the clean view the row
 standing for a run of hidden tool calls ends with the time of its first and of
-its last. The keys in the header (and the
+its last. The times say no day: the rule under the header names the day
+the window's top row was written on when that is not today, a rule across the
+turn names the day that begins where the turn went past midnight, and a hidden
+run that did ends with `+1`. The keys in the header (and the
 message under them, which `e` expands) light up under the mouse.
 
 Copying an item puts on the clipboard: a reply as Claude wrote it (Markdown), a

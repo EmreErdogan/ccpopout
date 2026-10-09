@@ -240,6 +240,33 @@ function stampText(time) {
   return [at.getHours(), at.getMinutes(), at.getSeconds()].map(part => String(part).padStart(2, '0')).join(':')
 }
 
+/** Midnight, here, of the day a record was written on; undefined for no time. */
+function dayOf(time) {
+  if (typeof time !== 'number' || Number.isNaN(time)) return undefined
+  const at = new Date(time)
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()
+}
+
+/** How many midnights lie between two records; 0 where either has no time. */
+function daysBetween(from, to) {
+  const first = dayOf(from)
+  const last = dayOf(to)
+  return first === undefined || last === undefined ? 0 : Math.round((last - first) / 86400000)
+}
+
+/** The day a record was written on, as this machine writes dates: '8 Oct', the year too when it is not this one. */
+function dayText(time) {
+  const at = new Date(time)
+  const year = at.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }
+  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...year })
+}
+
+/** A rule across the turn naming the day that begins under it. */
+function dayRow(time, width) {
+  const lead = `── ${dayText(time)} `
+  return { time, segs: [{ t: `${lead}${'─'.repeat(Math.max(0, width - textWidth(lead)))}`, s: S.gray, skip: true }] }
+}
+
 /** The cells a stamp takes at a row's right edge, the gap before it counted. */
 const stampRoom = stamp => (stamp === '' ? 0 : stamp.length + 2)
 
@@ -521,11 +548,14 @@ function hiddenRow(calls, width) {
   const tail = errors === 0 ? '' : ` · ${errors} ${errors === 1 ? 'error' : 'errors'}`
   // When the hidden calls were made: the first's time to the last's, at the edge.
   const times = calls.map(call => stampText(call.time)).filter(stamp => stamp !== '')
-  const stamp = times.length === 0 ? '' : times[0] === times.at(-1) ? times[0] : `${times[0]}–${times.at(-1)}`
+  // A run that went past midnight says by how many days: '23:50:10–00:10:02 +1'.
+  const days = daysBetween(calls[0].time, calls.at(-1).time)
+  const range = times.length === 0 ? '' : times[0] === times.at(-1) && days === 0 ? times[0] : `${times[0]}–${times.at(-1)}`
+  const stamp = days > 0 && range !== '' ? `${range} +${days}` : range
   const segs = room => [{ t: truncate(text, Math.max(8, room)), s: S.gray }, ...(tail === '' ? [] : [{ t: tail, s: S.red }])]
   // Where the times do not fit beside the count, the row is the count alone.
   const timed = stamp === '' ? undefined : stamped(segs(width - textWidth(tail) - stampRoom(stamp)), stamp, width)
-  return { segs: timed ?? segs(width - textWidth(tail)) }
+  return { time: calls[0].time, segs: timed ?? segs(width - textWidth(tail)) }
 }
 
 const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
@@ -800,7 +830,7 @@ class Transcript {
     const text = promptText(blockText(content))
     if (text === '') return false
     this.prompts.push(this.entries.length)
-    this.entries.push({ kind: 'prompt', text })
+    this.entries.push({ kind: 'prompt', text, time })
     return true
   }
 }
@@ -1055,8 +1085,21 @@ class View {
     // The clean view leaves Claude's words alone: each run of tool calls
     // between them is one row saying how many there were.
     let hidden = []
+    // Where what follows was written on another day than what came before, a
+    // rule names the day. A run of hidden calls is of the day it began on.
+    let day = dayOf(prompt?.time)
+    const newDay = time => {
+      const to = dayOf(time)
+      if (to === undefined) return
+      if (day !== undefined && to !== day) {
+        if (rows.length > 0 && rows.at(-1).segs.length > 0) rows.push(row())
+        rows.push(dayRow(time, width))
+      }
+      day = to
+    }
     const flush = () => {
       if (hidden.length === 0) return
+      newDay(hidden[0].time)
       rows.push(hiddenRow(hidden, width))
       hidden = []
     }
@@ -1064,6 +1107,8 @@ class View {
       if (entry.kind === 'call' && this.isClean) return hidden.push(entry)
       if (entry.kind === 'thinking' && this.isThinkingHidden) return
       flush()
+      newDay(entry.time)
+      const from = rows.length
       if (entry.kind === 'text' || entry.kind === 'thinking') {
         if (rows.length > 0 && rows.at(-1).segs.length > 0) rows.push(row())
         // Claude's own words: a bullet on the first row, the rest under it.
@@ -1108,6 +1153,8 @@ class View {
       } else if (entry.kind === 'call') {
         for (const line of callRows(entry, this.folds.get(entry.id), width)) rows.push({ ...line, item })
       }
+      // When each row was written: the rule over the window names the day of its top one.
+      for (let at = from; at < rows.length; at++) rows[at].time ??= entry.time
     })
     flush()
     while (rows.length > 0 && rows.at(-1).segs.length === 0) rows.pop()
@@ -1498,8 +1545,14 @@ class View {
     const bar = at =>
       max === 0 ? '' : `${ESC}[${width}G${RESET}${at >= thumbAt && at < thumbAt + thumb ? `${ESC}[${S.cyan}m┃` : `${ESC}[${sgr(S.gray, S.dim)}m│`}${RESET}`
     const live = this.notice !== '' ? this.notice : this.isFollowing ? ' following ' : ''
-    const rule = '─'.repeat(Math.max(0, width - range.length - live.length - 2))
-    frame.push(`${ESC}[${S.gray}m${rule}${ESC}[${S.tool}m${live}${range}${ESC}[${S.gray}m──${RESET}`)
+    // And the day the window's top row was written on, when that is not today.
+    const top = this.isHelp ? undefined : (shown.find(line => line.time !== undefined) ?? rows.slice(0, this.scroll).findLast(line => line.time !== undefined))
+    const topTime = this.isHelp ? undefined : (top?.time ?? this.entries()[0]?.time)
+    let day = dayOf(topTime) === undefined || dayOf(topTime) === dayOf(Date.now()) ? '' : ` ${dayText(topTime)} `
+    if (textWidth(day) + 2 + range.length + live.length + 2 > width) day = ''
+    const lead = day === '' ? '' : `──${ESC}[${S.tool}m${day}${ESC}[${S.gray}m`
+    const rule = '─'.repeat(Math.max(0, width - (day === '' ? 0 : textWidth(day) + 2) - range.length - live.length - 2))
+    frame.push(`${ESC}[${S.gray}m${lead}${rule}${ESC}[${S.tool}m${live}${range}${ESC}[${S.gray}m──${RESET}`)
 
     const bodyAt = frame.length
     for (let at = 0; at < this.windowRows; at++) {

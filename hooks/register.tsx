@@ -113,9 +113,21 @@ function clean(text: string, max = MAX_TEXT): string {
   return plain.length > max ? `${plain.slice(0, max)}\n… (${plain.length - max} more characters)` : plain
 }
 
-/** A person's prompt with the engine's tagged blocks taken out; '' for none. */
+/**
+ * A slash command sent to Claude (a skill, a custom command): its name and
+ * arguments. One the engine ran itself (/clear, /model) starts with its name
+ * instead, and is no message.
+ */
+const COMMAND = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>([\s\S]*?)<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>)?/
+
+/**
+ * A person's prompt with the engine's tagged blocks taken out; '' for none.
+ * A slash command reads as it was typed.
+ */
 function promptText(message: SessionMessage): string {
   if (message.role !== 'user' || (message.toolResults?.length ?? 0) > 0) return ''
+  const command = COMMAND.exec(message.text)
+  if (command !== null) return `${command[1]} ${command[2] ?? ''}`.trim()
   return message.text.replace(/<([a-z][a-z0-9-]*)>[\s\S]*?<\/\1>/g, '').trim()
 }
 
@@ -426,7 +438,7 @@ async function openInnerPane($: EngineInterface): Promise<void> {
   // scroll has nothing to land on and is refused.
   isPinning = true
   for (let attempt = 0; attempt < 20; attempt++) {
-    const moved = await $.ui.scroll({ in: PANE, to: { key: 'older' }, block: 'start' }).catch(() => ({ deny: 'failed' }))
+    const moved = await $.ui.scroll({ in: PANE, to: { key: 'close' }, block: 'start' }).catch(() => ({ deny: 'failed' }))
     if (!('deny' in moved)) break
     await $.clock.sleep(50)
   }
@@ -637,7 +649,21 @@ export const register: Register = on => {
     messages.forEach((message, at) => {
       if (promptText(message) !== '') prompts.push(at)
     })
-    if (prompts.length === 0) return <Text dimColor>No messages yet.</Text>
+    if (prompts.length === 0) {
+      // The header's row all the same, so `q` closes this as it does a turn.
+      return (
+        <Box flexDirection="column" width={width} height={treeRows}>
+          <Box height={PIN} flexShrink={0} />
+          <Box flexDirection="row" width={width} height={1} flexShrink={0} overflow="hidden" backgroundColor={HEADER_BG}>
+            <Button key="close" hotkey="q" plain onPress={() => $.ui.close({ id: PANE })}>
+              close
+            </Button>
+            <Box flexGrow={1} backgroundColor={HEADER_BG} />
+          </Box>
+          <Text dimColor>No messages yet.</Text>
+        </Box>
+      )
+    }
 
     const index = Math.min(await read($, turnIndex), prompts.length - 1)
     const start = prompts[prompts.length - 1 - index] ?? 0

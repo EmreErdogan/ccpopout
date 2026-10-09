@@ -273,6 +273,25 @@ test('the pane says so when there is nothing yet', async ($, on) => {
   on('session.messages', () => ({ value: [] }))
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ text: /No messages yet/ })).toBeDefined()
+  expect(await ui.find({ key: 'close' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a slash command sent to Claude is a message, one the engine ran is not', async ($, on) => {
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>', toolUses: [] },
+      {
+        role: 'user',
+        text: '<command-message>make-story</command-message>\n<command-name>/make-story</command-name>\n<command-args>redis-namespace</command-args>',
+        toolUses: [],
+      },
+      { role: 'assistant', text: 'Story written.', toolUses: [] },
+    ],
+  }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ text: /1\/1 › \/make-story redis-namespace/ })).toBeDefined()
+  expect(await ui.find({ text: /Story written/ })).toBeDefined()
   await ui.unmount()
 })
 

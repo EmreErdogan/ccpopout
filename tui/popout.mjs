@@ -578,8 +578,20 @@ function copyToClipboard(out, text) {
 
 // ───────────────────────────── transcript ─────────────────────────────
 
-/** A person's prompt with the engine's tagged blocks taken out; '' for none. */
+/**
+ * A slash command sent to Claude (a skill, a custom command): its name and
+ * arguments. One the engine ran itself (/clear, /model) starts with its name
+ * instead, and is no message.
+ */
+const COMMAND = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>([\s\S]*?)<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>)?/
+
+/**
+ * A person's prompt with the engine's tagged blocks taken out; '' for none.
+ * A slash command reads as it was typed.
+ */
 function promptText(text) {
+  const command = COMMAND.exec(text)
+  if (command !== null) return `${command[1]} ${command[2] ?? ''}`.trim()
   return text.replace(/<([a-z][a-z0-9-]*)>[\s\S]*?<\/\1>/g, '').trim()
 }
 

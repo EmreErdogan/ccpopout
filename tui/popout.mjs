@@ -854,8 +854,8 @@ const HELP = [
   ]],
   ['Scrolling', [
     ['k   j', 'one row up, down'],
-    ['K  u  PgUp', 'one page up'],
-    ['J  d  PgDn  space', 'one page down'],
+    ['K  u  PgUp', 'half a page up'],
+    ['J  d  PgDn  space', 'half a page down'],
     ['g  Home', 'top'],
     ['G  End', 'bottom, and follow new output'],
     ['wheel', 'three rows'],
@@ -1266,7 +1266,8 @@ class View {
   }
 
   key(name) {
-    const page = Math.max(1, this.windowRows - 1)
+    // The page keys move half the window: what was read stays in sight.
+    const page = Math.max(1, this.windowRows >> 1)
     const { back } = this
     this.back = undefined
     if (name === '?' || name === 'h') return this.help(!this.isHelp)

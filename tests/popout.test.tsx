@@ -43,6 +43,11 @@ const CONVERSATION: SessionMessage[] = [
   { role: 'assistant', text: 'Done editing.', toolUses: [] },
 ]
 
+/** Presses a key of the pane `times` over. */
+const presses = async (ui: { press: (target: { key: string }) => Promise<unknown> }, key: string, times: number) => {
+  for (let at = 0; at < times; at++) await ui.press({ key })
+}
+
 const PANE = {
   plugin: 'ccpopout',
   component: 'Pane' as const,
@@ -120,18 +125,15 @@ test('the pane keeps its header and scrolls the body beneath it', async ($, on) 
     expect(await ui.find({ text: /Editing now/ })).toBeDefined()
     expect(await ui.find({ text: /Done editing/ })).toBeUndefined()
 
-    await ui.press({ key: 'pageDown' })
-    await ui.press({ key: 'pageDown' })
-    await ui.press({ key: 'pageDown' })
+    // Half a page is a row here: five of them to the end.
+    await presses(ui, 'pageDown', 5)
     expect(await ui.find({ text: /second question/ })).toBeDefined()
     expect(await ui.find({ key: 'older' })).toBeDefined()
     expect(await ui.find({ text: /Editing now/ })).toBeUndefined()
     expect(await ui.find({ text: /Done editing/ })).toBeDefined()
 
     await ui.press({ key: 'up' })
-    await ui.press({ key: 'pageUp' })
-    await ui.press({ key: 'pageUp' })
-    await ui.press({ key: 'pageUp' })
+    await presses(ui, 'pageUp', 5)
     expect(await ui.find({ text: /Editing now/ })).toBeDefined()
     await ui.unmount()
   }
@@ -200,16 +202,12 @@ test('a cursor the window leaves out of sight comes to the nearest item in it', 
   expect(copied.at(-1)).toContain('--- /x/a.ts')
 
   // To the end: the failed Bash call is the top item there.
-  await ui.press({ key: 'pageDown' })
-  await ui.press({ key: 'pageDown' })
-  await ui.press({ key: 'pageDown' })
+  await presses(ui, 'pageDown', 5)
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe('$ false\nBOOM')
 
   // Back to the top: the cursor leaves at the bottom, and ends on the Edit.
-  await ui.press({ key: 'pageUp' })
-  await ui.press({ key: 'pageUp' })
-  await ui.press({ key: 'pageUp' })
+  await presses(ui, 'pageUp', 5)
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toContain('--- /x/a.ts')
   await ui.unmount()
@@ -225,11 +223,10 @@ test('the pane keeps its place over a change to the rows, and returns to it', as
     return { value: { isCopied: true } as never }
   })
 
-  // Six rows: three of header, three of body. Two pages down: the failed Bash
+  // Six rows: three of header, three of body. Four rows down: the failed Bash
   // call at the top of the window, the cursor on it.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 6 } } })
-  await ui.press({ key: 'pageDown' })
-  await ui.press({ key: 'pageDown' })
+  await presses(ui, 'pageDown', 4)
   const isThere = async () => (await ui.find({ text: /BOOM/ })) !== undefined && (await ui.find({ text: /Editing now/ })) === undefined
   expect(await isThere()).toBe(true)
 

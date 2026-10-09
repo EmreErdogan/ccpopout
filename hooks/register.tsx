@@ -203,7 +203,7 @@ const HELP: [string, [string, string][]][] = [
   ]],
   ['Scrolling', [
     ['k   j', 'one row up, down'],
-    ['u   d', 'one page up, down'],
+    ['u   d', 'half a page up, down'],
     ['wheel', 'scrolls'],
   ]],
   ['All at once', [
@@ -1010,11 +1010,11 @@ export const register: Register = on => {
             ▼
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
-          <Button key="pageUp" hotkey="u" plain dimColor={scrolled === 0} onPress={scroll(-(windowRows - 1))}>
+          <Button key="pageUp" hotkey="u" plain dimColor={scrolled === 0} onPress={scroll(-Math.max(1, windowRows >> 1))}>
             pg▲
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
-          <Button key="pageDown" hotkey="d" plain dimColor={scrolled >= maxScroll} onPress={scroll(windowRows - 1)}>
+          <Button key="pageDown" hotkey="d" plain dimColor={scrolled >= maxScroll} onPress={scroll(Math.max(1, windowRows >> 1))}>
             pg▼
           </Button>
           <Box flexGrow={1} backgroundColor={HEADER_BG} />

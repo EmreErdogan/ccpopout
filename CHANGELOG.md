@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.4.1 — 2026-10-09
+
 ### Side pane
 
 - The times at the rows' edge say no day, so the day is named where it is not

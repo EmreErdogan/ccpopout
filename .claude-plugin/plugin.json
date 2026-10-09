@@ -1,6 +1,6 @@
 {
   "name": "ccpopout",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Read a Claude Code session one message at a time: what Claude did since each of your messages, in a pane or a side terminal",
   "author": {
     "name": "EmreErdogan",

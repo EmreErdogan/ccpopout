@@ -159,8 +159,10 @@ message under them, which `e` expands) light up under the mouse.
 
 Copying an item puts on the clipboard: a reply as Claude wrote it (Markdown), a
 Bash call as its command and output, an edit as a unified diff. Dragging the
-mouse in the side pane selects text as the rows on screen read, and copies it
-when the button is let go. The side pane copies with the OSC 52 escape
+mouse in the side pane selects text and copies it when the button is let go:
+the text itself, without what the layout put around it (indents, marks, line
+numbers, times), and a line the pane wrapped whole again. What is lit is what
+is copied. The side pane copies with the OSC 52 escape
 sequence, which your terminal and multiplexer must allow.
 
 ## Notes and limits

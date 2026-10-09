@@ -80,20 +80,24 @@ function textWidth(text) {
   return width
 }
 
-/** The characters of `text` in the cells from `from` up to `to`, and the cell the first of them is in. */
-function cellSlice(text, from, to) {
-  let out = ''
+/**
+ * The characters of `text` in the cells from `from` up to `to`, as runs of
+ * neighbours with the cell each starts in; those in `skips` (cell ranges) left out.
+ */
+function cellRuns(text, from, to, skips = []) {
+  const runs = []
   let col = 0
-  let start
+  let run
   for (const ch of text) {
     if (col >= to) break
-    if (col >= from) {
-      start ??= col
-      out += ch
-    }
-    col += charWidth(ch)
+    const w = charWidth(ch)
+    if (col >= from && !skips.some(([first, end]) => col >= first && col < end)) {
+      if (run === undefined) runs.push((run = { start: col, text: '' }))
+      run.text += ch
+    } else if (w > 0) run = undefined
+    col += w
   }
-  return { text: out, start: start ?? from }
+  return runs
 }
 
 /** A drawn row as the text on screen: no escapes, and not the scroll bar at its edge. */
@@ -137,8 +141,13 @@ const row = (t = '', s = '', extra) => ({ segs: t === '' ? [] : [{ t, s }], ...e
  * Wraps styled segments into rows of at most `width` cells at word
  * boundaries (hard where `isHard` or a word is too long), continuation rows
  * under `hang`.
+ *
+ * A segment marked `skip` is the layout's, not the text's: a selection leaves
+ * it out, as it does `hang`. A continuation row holds as `glue` what the wrap
+ * took from between it and the row before: a space, or nothing.
  */
 function wrapSegs(segs, width, { first = [], hang = [], isHard = false } = {}) {
+  hang = hang.map(seg => ({ ...seg, skip: true }))
   const firstWidth = first.reduce((sum, seg) => sum + textWidth(seg.t), 0)
   const hangWidth = hang.reduce((sum, seg) => sum + textWidth(seg.t), 0)
   const cells = []
@@ -147,6 +156,7 @@ function wrapSegs(segs, width, { first = [], hang = [], isHard = false } = {}) {
   const rows = []
   let at = 0
   let isFirst = true
+  let glue
   while (at < cells.length || isFirst) {
     const room = Math.max(4, width - (isFirst ? firstWidth : hangWidth))
     let used = 0
@@ -172,7 +182,8 @@ function wrapSegs(segs, width, { first = [], hang = [], isHard = false } = {}) {
       if (last !== undefined && last.s === cells[i].s && last !== first.at(-1) && last !== hang.at(-1)) last.t += cells[i].ch
       else out.push({ t: cells[i].ch, s: cells[i].s })
     }
-    rows.push({ segs: out })
+    rows.push(glue === undefined ? { segs: out } : { segs: out, glue })
+    glue = next > end ? ' ' : ''
     at = next
     isFirst = false
   }
@@ -214,7 +225,7 @@ function cutSegs(segs, width) {
       text += ch
       room -= w
     }
-    out.push({ t: text, s: seg.s })
+    out.push({ ...seg, t: text })
     if (text !== seg.t) break
   }
   return [...out, { t: '…', s: '' }]
@@ -236,7 +247,7 @@ const stampRoom = stamp => (stamp === '' ? 0 : stamp.length + 2)
 function stamped(segs, stamp, width) {
   const gap = width - segsWidth(segs) - stamp.length
   if (gap < 2) return undefined
-  return [...segs, { t: ' '.repeat(gap), s: '' }, { t: stamp, s: S.stamp }]
+  return [...segs, { t: ' '.repeat(gap), s: '', skip: true }, { t: stamp, s: S.stamp, skip: true }]
 }
 
 const splitCells = line =>
@@ -302,13 +313,13 @@ function proseRows(markdown, width) {
       const lang = fence[3].toLowerCase()
       const body = []
       for (at++; at < source.length && !source[at].trimStart().startsWith(fence[2]); at++) body.push(source[at])
-      if (lang !== '') rows.push(row(`  ${lang}`, S.gray))
+      if (lang !== '') rows.push({ segs: [{ t: `  ${lang}`, s: S.gray, skip: true }] })
       for (const line of body) {
         let style = ''
         if (lang === 'diff' || lang === 'patch') {
           style = line.startsWith('+') ? S.green : line.startsWith('-') ? S.red : line.startsWith('@@') ? S.cyan : ''
         }
-        const gutter = [{ t: '  ', s: '' }]
+        const gutter = [{ t: '  ', s: '', skip: true }]
         for (const out of wrapSegs([{ t: line, s: style }], width - 1, { first: gutter, hang: gutter, isHard: true })) {
           rows.push({ ...out, bg: S.codeBg })
         }
@@ -344,7 +355,7 @@ function proseRows(markdown, width) {
 
     const quote = /^\s*>\s?(.*)$/.exec(raw)
     if (quote !== null) {
-      const bar = [{ t: '▎ ', s: S.gray }]
+      const bar = [{ t: '▎ ', s: S.gray, skip: true }]
       rows.push(...wrapSegs(inline(quote[1], S.italic), width, { first: bar, hang: bar }))
       continue
     }
@@ -420,7 +431,7 @@ const plainRows = (text, width, style) =>
   clean(text)
     .trimEnd()
     .split('\n')
-    .flatMap(line => wrapSegs([{ t: line, s: style }], width, { first: [{ t: '  ', s: '' }], hang: [{ t: '  ', s: '' }], isHard: true }))
+    .flatMap(line => wrapSegs([{ t: line, s: style }], width, { first: [{ t: '  ', s: '', skip: true }], hang: [{ t: '  ', s: '' }], isHard: true }))
 
 /** A structured patch as rows: line numbers, a sign column, tinted rows. */
 function diffRows(patch, width) {
@@ -428,7 +439,7 @@ function diffRows(patch, width) {
   const last = Math.max(1, ...patch.map(hunk => Math.max(hunk.oldStart + hunk.oldLines, hunk.newStart + hunk.newLines)))
   const digits = String(last).length
   for (const hunk of patch) {
-    rows.push(row(`  @@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, S.cyan))
+    rows.push({ segs: [{ t: '  ', s: '', skip: true }, { t: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, s: S.cyan }] })
     let oldAt = hunk.oldStart
     let newAt = hunk.newStart
     for (const line of hunk.lines ?? []) {
@@ -438,7 +449,7 @@ function diffRows(patch, width) {
       const tint = sign === '+' ? S.addBg : sign === '-' ? S.delBg : undefined
       const signStyle = sign === '+' ? sgr(S.green, S.bold) : sign === '-' ? sgr(S.red, S.bold) : S.gray
       const first = [
-        { t: `  ${String(number).padStart(digits)} `, s: S.gray },
+        { t: `  ${String(number).padStart(digits)} `, s: S.gray, skip: true },
         { t: `${sign === ' ' ? ' ' : sign} `, s: signStyle },
       ]
       const hang = [{ t: ' '.repeat(digits + 5), s: '' }]
@@ -462,7 +473,7 @@ function callResult(call, width) {
       const digits = String(lines.length).length
       const body = lines.flatMap((line, at) =>
         wrapSegs([{ t: line, s: '' }], width, {
-          first: [{ t: `  ${String(at + 1).padStart(digits)} `, s: S.gray }, { t: '+ ', s: sgr(S.green, S.bold) }],
+          first: [{ t: `  ${String(at + 1).padStart(digits)} `, s: S.gray, skip: true }, { t: '+ ', s: sgr(S.green, S.bold) }],
           hang: [{ t: ' '.repeat(digits + 5), s: '' }],
           isHard: true,
         }).map(r => ({ ...r, bg: S.addBg })),
@@ -485,9 +496,9 @@ function callResult(call, width) {
     const command = clean(call.input?.command ?? '')
     const body = []
     if (command !== '') {
-      const first = [{ t: '  $ ', s: sgr(S.bold, S.yellow) }]
+      const first = [{ t: '  $ ', s: sgr(S.bold, S.yellow), skip: true }]
       for (const line of command.split('\n')) {
-        body.push(...wrapSegs([{ t: line, s: S.bold }], width, { first: body.length === 0 ? first : [{ t: '    ', s: '' }], hang: [{ t: '    ', s: '' }], isHard: true }))
+        body.push(...wrapSegs([{ t: line, s: S.bold }], width, { first: body.length === 0 ? first : [{ t: '    ', s: '', skip: true }], hang: [{ t: '    ', s: '' }], isHard: true }))
       }
     }
     if ((stdout + fallback).trim() !== '') body.push(...plainRows(stdout + fallback, width, S.dim))
@@ -534,7 +545,7 @@ function callRows(call, stored, width) {
     const tone = isError ? S.red : S.tool
     const rest = isError ? S.red : S.gray
     const segs = [
-      { t: `${mark} `, s: tone },
+      { t: `${mark} `, s: tone, skip: true },
       { t: name, s: sgr(tone, isUnfolded ? S.bold : '') },
       { t: `${fitted.slice(name.length)} · ${tail}`, s: rest },
     ]
@@ -935,7 +946,7 @@ class View {
     this.pressed = undefined
     /** A drag's two ends in screen cells, from 1: where it began, where the mouse is. */
     this.selection = undefined
-    /** The rows last drawn as text, each with the cells on its left a selection leaves out. */
+    /** The rows last drawn as text, each with the cells a selection leaves out and how it joins the row before. */
     this.plain = []
   }
 
@@ -1075,14 +1086,14 @@ class View {
           const kept = prose.filter(line => line.segs.length > 0).slice(0, FOLDED_ROWS)
           const tail = ` · ${prose.length} lines`
           kept.forEach((line, at) => {
-            const lead = at === 0 ? { t: foldedMark, s: S.bold } : { t: foldedPad, s: '' }
+            const lead = at === 0 ? { t: foldedMark, s: S.bold, skip: true } : { t: foldedPad, s: '', skip: true }
             const isLast = at === kept.length - 1
-            const segs = isLast ? [...cutSegs(line.segs, Math.max(8, width - foldedPad.length - textWidth(tail) - stampRoom(stamp))), { t: tail, s: S.gray }] : line.segs
+            const segs = isLast ? [...cutSegs(line.segs, Math.max(8, width - foldedPad.length - textWidth(tail) - stampRoom(stamp))), { t: tail, s: S.gray, skip: true }] : line.segs
             rows.push({ ...line, item, call: at === 0 ? fold : undefined, segs: [lead, ...segs] })
           })
         } else {
           prose.forEach((line, at) => {
-            const lead = at === 0 ? { t: mark, s: S.bold } : { t: pad, s: '' }
+            const lead = at === 0 ? { t: mark, s: S.bold, skip: true } : { t: pad, s: '', skip: true }
             rows.push({ ...line, item, call: at === 0 ? fold : undefined, segs: [lead, ...line.segs] })
           })
         }
@@ -1368,17 +1379,22 @@ class View {
     const [first, last] = isForward ? [drag.from, drag.to] : [drag.to, drag.from]
     const row = this.plain[y - 1]
     if (row === undefined || y < first.y || y > last.y) return undefined
-    return [Math.max(row.skip, y === first.y ? first.x - 1 : 0), y === last.y ? last.x : Infinity]
+    return [y === first.y ? first.x - 1 : 0, y === last.y ? last.x : Infinity]
   }
 
-  /** What the selection holds, as the rows on screen read; '' for nothing. */
+  /**
+   * What the selection holds: the text of its rows without what the layout
+   * put there (indents, marks, times), a wrapped line whole again; '' for nothing.
+   */
   selectionText() {
-    const rows = []
+    let text
     this.plain.forEach((row, at) => {
       const span = this.span(at + 1)
-      if (span !== undefined) rows.push(cellSlice(row.text, span[0], span[1]).text.trimEnd())
+      if (span === undefined || row.isLayout) return
+      const cut = cellRuns(row.text, span[0], span[1], row.skips).map(run => run.text).join('').trimEnd()
+      text = text === undefined ? cut : `${text}${row.glue ?? '\n'}${cut}`
     })
-    return rows.join('\n').trim() === '' ? '' : rows.join('\n')
+    return (text ?? '').trim() === '' ? '' : text
   }
 
   /** The button went down: the keys row answers at once, the rest when it is let go. */
@@ -1491,8 +1507,21 @@ class View {
       else frame.push(`${RESET}${line?.item === this.cursor ? `${ESC}[${S.cyan}m▌ ` : '  '}${paint(line, width - GUTTER - BAR)}${bar(at)}`)
     }
 
-    // A selection leaves out the cursor's cells beside the turn's rows.
-    this.plain = frame.map((line, at) => ({ text: plainOf(line), skip: at >= bodyAt && !this.isHelp ? GUTTER : 0 }))
+    // A selection leaves out the cursor's cells and what else is the layout's.
+    this.plain = frame.map((drawn, at) => {
+      const line = at < bodyAt ? undefined : shown[at - bodyAt]
+      const left = at >= bodyAt && !this.isHelp ? GUTTER : 0
+      const skips = left === 0 ? [] : [[0, left]]
+      let col = left
+      for (const seg of line?.segs ?? []) {
+        const cells = textWidth(seg.t)
+        if (seg.skip === true) skips.push([col, col + cells])
+        col += cells
+      }
+      // A row of the layout's alone (a time, a code block's language) is no row of the text; a blank one is.
+      const isLayout = line !== undefined && line.segs.every(seg => seg.skip === true) && line.segs.some(seg => seg.t.trim() !== '')
+      return { text: plainOf(drawn), skips, glue: line?.glue, isLayout }
+    })
     let text = `${ESC}[?2026h`
     frame.forEach((line, at) => {
       text += `${ESC}[${at + 1};1H${line}`
@@ -1501,8 +1530,10 @@ class View {
     this.plain.forEach((row, at) => {
       const span = this.span(at + 1)
       if (span === undefined) return
-      const cut = cellSlice(row.text, span[0], span[1])
-      if (cut.text !== '') text += `${ESC}[${at + 1};${cut.start + 1}H${ESC}[${S.inverse}m${cut.text}${RESET}`
+      // Only what will be copied is lit.
+      for (const run of cellRuns(row.text, span[0], span[1], row.skips)) {
+        text += `${ESC}[${at + 1};${run.start + 1}H${ESC}[${S.inverse}m${run.text}${RESET}`
+      }
     })
     this.out.write(`${text}${ESC}[?2026l`)
     this.hovered = this.over()

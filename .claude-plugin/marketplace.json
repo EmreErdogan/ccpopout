@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "ccpopout: read a Claude Code session one message at a time",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "ccpopout",
       "description": "Read a Claude Code session one message at a time: what Claude did since each of your messages, in a pane or a side terminal",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "author": {
         "name": "EmreErdogan",
         "url": "https://github.com/EmreErdogan"

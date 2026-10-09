@@ -983,7 +983,11 @@ class View {
       const newest = Math.max(0, this.count - 1)
       if (newest !== this.turn) this.show(newest)
     }
+    // Following, a cursor on the last item stays on the last as more arrives.
+    const lastItem = rows => rows?.findLast(line => line.item !== undefined)?.item
+    const isOnLast = this.isFollowing && !this.isHelp && this.cursor === lastItem(this.rows)
     this.rows = undefined
+    if (isOnLast) this.cursor = lastItem(this.build()) ?? this.cursor
   }
 
   show(turn) {

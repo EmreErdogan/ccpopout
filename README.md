@@ -142,7 +142,8 @@ single lowercase letters there.
 
 The cursor (`▌`) stays in sight: when scrolling takes its item off the screen
 it comes to the nearest one still there, the top item going down and the bottom
-one going up. `g` and `G` take it to the first and the last item.
+one going up. `g` and `G` take it to the first and the last item; while `G`
+follows new output, a cursor left on the last item moves on to each new one.
 
 The turn keeps its place when its rows change: after the clean view (`z`),
 hiding the thinking (`t`), opening or folding many at once (`a`, `f`, `b`, `r`)

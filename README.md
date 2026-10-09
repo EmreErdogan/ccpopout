@@ -144,6 +144,12 @@ The cursor (`▌`) stays in sight: when scrolling takes its item off the screen
 it comes to the nearest one still there, the top item going down and the bottom
 one going up. `g` and `G` take it to the first and the last item.
 
+The turn keeps its place when its rows change: after the clean view (`z`),
+hiding the thinking (`t`), opening or folding many at once (`a`, `f`, `b`, `r`)
+or a new width, the cursor's item is on the row of the screen it was on. `z`
+and `t` pressed again with nothing done between return exactly to where the
+turn was, and so does closing the whole message (`e`) or the help.
+
 In the side pane each reply and each tool call ends with the time it was
 written to the transcript, in your local time. The keys in the header (and the
 message under them, which `e` expands) light up under the mouse.

@@ -921,6 +921,10 @@ class View {
     this.hovered = ''
     /** The row the window started at when the turn was last drawn. */
     this.drawnScroll = 0
+    /** Where the turn stood before `z` or `t`, while nothing was done since: the same key returns there. */
+    this.back = undefined
+    /** Where the turn stood before `e` showed the whole message: folding it returns there. */
+    this.expandBack = undefined
     /** Where the button went down, until it is let go. */
     this.pressed = undefined
     /** A drag's two ends in screen cells, from 1: where it began, where the mouse is. */
@@ -988,6 +992,8 @@ class View {
     if (to === this.turn && this.rows !== undefined) return
     this.turn = to
     this.isExpanded = false
+    this.expandBack = undefined
+    this.back = undefined
     this.isFollowing = false
     this.scroll = 0
     this.cursor = 0
@@ -1095,6 +1101,7 @@ class View {
   }
 
   scrollBy(by) {
+    this.back = undefined
     const max = this.maxScroll
     this.scroll = Math.max(0, Math.min(max, Math.min(this.scroll, max) + by))
     this.isFollowing = by > 0 && this.isFollowing && this.scroll >= max
@@ -1128,12 +1135,48 @@ class View {
     this.isFollowing = false
   }
 
-  /** After items were hidden or shown: a cursor on one now hidden comes to the item after it, or the last. */
-  settle() {
+  /**
+   * Runs a change to the turn's rows, the cursor's item kept on the row of the
+   * screen it was on (the window starting at `scroll`). A cursor on an item the
+   * change hid comes to the item after it, or the last.
+   */
+  anchored(change, scroll = Math.min(this.scroll, this.maxScroll)) {
+    const before = this.isHelp ? -1 : (this.rows ?? this.build()).findIndex(line => line.item === this.cursor)
+    change()
     this.rows = undefined
-    const items = [...new Set(this.build().flatMap(line => (line.item === undefined ? [] : [line.item])))]
+    if (this.isHelp) return
+    const rows = this.build()
+    const items = [...new Set(rows.flatMap(line => (line.item === undefined ? [] : [line.item])))]
     if (!items.includes(this.cursor)) this.cursor = items.find(item => item > this.cursor) ?? items.at(-1) ?? 0
-    this.reveal()
+    const first = rows.findIndex(line => line.item === this.cursor)
+    if (before === -1 || first === -1) return this.reveal()
+    // Following, the window stays at the end.
+    if (this.isFollowing) return
+    this.scroll = Math.max(0, Math.min(this.maxScroll, first - (before - scroll)))
+    const last = rows.findLastIndex(line => line.item === this.cursor)
+    if (last < this.scroll || first >= this.scroll + this.windowRows) this.reveal()
+  }
+
+  /**
+   * `z` hides or shows the tool calls, `t` the thinking. Pressed again with
+   * nothing done between (`back`), the turn is where it was.
+   */
+  toggle(key, back) {
+    const flip = () => {
+      if (key === 'z') this.isClean = !this.isClean
+      else this.isThinkingHidden = !this.isThinkingHidden
+    }
+    if (back?.key === key) {
+      flip()
+      this.rows = undefined
+      this.scroll = back.scroll
+      this.cursor = back.cursor
+      this.isFollowing = back.isFollowing
+      return
+    }
+    const at = { key, scroll: Math.min(this.scroll, this.maxScroll), cursor: this.cursor, isFollowing: this.isFollowing }
+    this.anchored(flip)
+    this.back = at
   }
 
   /** Moves the cursor an item up or down. */
@@ -1185,10 +1228,11 @@ class View {
 
   /** Opens or folds everything of the turn that folds (calls, replies, thinking), or what is of one kind. */
   foldAll(isUnfolded, kind) {
-    for (const call of this.foldable()) {
-      if (kind === undefined || call.kind === kind) this.folds.set(call.id, isUnfolded)
-    }
-    this.rows = undefined
+    this.anchored(() => {
+      for (const call of this.foldable()) {
+        if (kind === undefined || call.kind === kind) this.folds.set(call.id, isUnfolded)
+      }
+    })
   }
 
   help(isShown) {
@@ -1202,6 +1246,8 @@ class View {
 
   key(name) {
     const page = Math.max(1, this.windowRows - 1)
+    const { back } = this
+    this.back = undefined
     if (name === '?' || name === 'h') return this.help(!this.isHelp)
     if (this.isHelp && !SCROLL_KEYS.has(name)) return this.help(false)
     if (this.isHelp && (name === 'up' || name === 'down')) return this.scrollBy(name === 'up' ? -1 : 1)
@@ -1223,16 +1269,19 @@ class View {
       case 'c':
         return this.copy()
       case 'z':
-        this.isClean = !this.isClean
-        return this.settle()
       case 't':
-        this.isThinkingHidden = !this.isThinkingHidden
-        return this.settle()
-      case 'e':
+        return this.toggle(name, back)
+      case 'e': {
+        // The whole message is read from its top; folded again, the turn is where it was.
+        const to = this.isExpanded ? this.expandBack : undefined
+        this.expandBack = this.isExpanded ? undefined : { scroll: Math.min(this.scroll, this.maxScroll), cursor: this.cursor, isFollowing: this.isFollowing }
         this.isExpanded = !this.isExpanded
-        this.scroll = 0
+        this.scroll = to?.scroll ?? 0
+        this.cursor = to?.cursor ?? this.cursor
+        this.isFollowing = to?.isFollowing ?? false
         this.rows = undefined
         return
+      }
       case 'k':
         return this.scrollBy(-1)
       case 'j':
@@ -1357,6 +1406,7 @@ class View {
     if (this.isHelp) return this.help(false)
     if (y < this.headerRows) return this.key('e')
     if (y === this.headerRows) return
+    this.back = undefined
     const line = this.build()[this.scroll + y - this.headerRows - 1]
     if (line?.item === undefined) return
     this.cursor = line.item
@@ -1622,7 +1672,9 @@ function main() {
     if (isDirty) view.draw()
   })
   process.stdout.on('resize', () => {
-    view.rows = undefined
+    // The rows wrap anew: the cursor's item stays on the row of the screen it was on.
+    view.anchored(() => {}, view.drawnScroll)
+    view.back = undefined
     view.selection = undefined
     process.stdout.write(`${ESC}[2J`)
     view.draw()

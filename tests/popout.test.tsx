@@ -215,6 +215,57 @@ test('a cursor the window leaves out of sight comes to the nearest item in it', 
   await ui.unmount()
 })
 
+test('the pane keeps its place over a change to the rows, and returns to it', async ($, on) => {
+  on('session.messages', () => ({ value: CONVERSATION }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } as never }
+  })
+
+  // Six rows: three of header, three of body. Two pages down: the failed Bash
+  // call at the top of the window, the cursor on it.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 6 } } })
+  await ui.press({ key: 'pageDown' })
+  await ui.press({ key: 'pageDown' })
+  const isThere = async () => (await ui.find({ text: /BOOM/ })) !== undefined && (await ui.find({ text: /Editing now/ })) === undefined
+  expect(await isThere()).toBe(true)
+
+  // The help and the whole message open at their top, and close onto the turn where it was.
+  await ui.press({ key: 'help' })
+  expect(await ui.find({ text: /BOOM/ })).toBeUndefined()
+  await ui.press({ key: 'help' })
+  expect(await isThere()).toBe(true)
+  await ui.press({ key: 'expand' })
+  expect(await ui.find({ text: /BOOM/ })).toBeUndefined()
+  await ui.press({ key: 'expand' })
+  expect(await isThere()).toBe(true)
+
+  // The clean view puts the reply after the hidden call where the call was;
+  // left again with nothing moved, the turn is where it was, cursor and all.
+  await ui.press({ key: 'clean' })
+  expect(await ui.find({ text: /Done editing/ })).toBeDefined()
+  await ui.press({ key: 'clean' })
+  expect(await isThere()).toBe(true)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ false\nBOOM')
+
+  // Every call folded, then opened: the rows above grow, the call stays put.
+  await ui.press({ key: 'foldAll' })
+  expect(await ui.find({ text: /BOOM/ })).toBeUndefined()
+  expect(await ui.find({ key: 'call:b2' })).toBeDefined()
+  await ui.press({ key: 'foldAll' })
+  expect(await isThere()).toBe(true)
+  expect(await ui.find({ text: /@@ -1,2/ })).toBeUndefined()
+  // And the window moves on from there.
+  await ui.press({ key: 'down' })
+  expect(await ui.find({ text: /Done editing/ })).toBeDefined()
+  expect(await ui.find({ key: 'call:b2' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('the pane moves a cursor over the items, opens the one it is on and copies it', async ($, on) => {
   on('session.messages', () => ({ value: CONVERSATION }))
   on('clock.sleep', () => ({ value: undefined }))

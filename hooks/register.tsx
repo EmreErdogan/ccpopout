@@ -44,6 +44,23 @@ let windowRows = 10
 /** Of the turn last drawn: each item's first and last row, and the row the window starts at. */
 let itemRows: { item: number; first: number; last: number }[] = []
 let drawnScroll = 0
+let drawnWidth = 0
+/**
+ * Held from a change to a turn's rows (a fold of many, the clean view, a new
+ * width): how far down the window the cursor's item was. A draw is pure and
+ * cannot move `scrollRows`, so each one places the window by this instead,
+ * until a handler that moves the window or the cursor takes it up (`settle`).
+ */
+let anchor: { start: number; offset: number } | undefined
+/**
+ * Where the turn stood before `z`, and (`after`) as first drawn in the other
+ * view: `z` pressed again with the turn still there returns to where it was.
+ */
+let cleanBack: { start: number; wasClean: boolean; scroll: number; cursor: number; after?: { scroll: number; cursor: number } } | undefined
+/** Where the turn stood before `e` showed the whole message: folding it returns there. */
+let expandBack: { start: number; scroll: number; cursor: number } | undefined
+/** Where the turn's window stood when the help opened over it. */
+let helpBack = 0
 /** The cells left of the turn's rows, where the cursor's bar is drawn. */
 const GUTTER = 2
 /** The cell at the right edge, where the scroll bar is drawn. */
@@ -344,12 +361,21 @@ function scrolledBy(was: number, by: number): number {
   return Math.max(0, Math.min(maxScroll, Math.min(was, maxScroll) + by))
 }
 
+/** Makes the window's place under a held anchor `scrollRows` itself, for a handler about to move it. */
+async function settle($: EngineInterface): Promise<void> {
+  if (anchor === undefined) return
+  anchor = undefined
+  const to = drawnScroll
+  await update($, scrollRows, () => to)
+}
+
 /**
  * Moves the window `by` rows over the turn last drawn. A cursor it leaves out
  * of sight comes to the nearest item still in it: the top one going down, the
  * bottom one going up.
  */
 async function scrollWindow($: EngineInterface, by: number): Promise<void> {
+  await settle($)
   const to = scrolledBy(await read($, scrollRows), by)
   await update($, scrollRows, () => to)
   const shown = itemRows.filter(rows => rows.last >= to && rows.first < to + windowRows)
@@ -432,6 +458,7 @@ async function flash($: EngineInterface, text: string): Promise<void> {
  */
 async function moveCursor($: EngineInterface, step: number): Promise<void> {
   if (itemRows.length === 0) return
+  await settle($)
   const cursor = await read($, cursorItem)
   const isShown = (rows: { first: number; last: number }) => rows.last >= drawnScroll && rows.first < drawnScroll + windowRows
   let at = itemRows.findIndex(rows => rows.item === cursor)
@@ -453,8 +480,17 @@ async function moveCursor($: EngineInterface, step: number): Promise<void> {
   else if (to.last >= drawnScroll + windowRows) await update($, scrollRows, () => Math.min(maxScroll, Math.min(to.first, to.last - windowRows + 1)))
 }
 
+/** Lets go of what was kept of a turn's place: another turn is shown. */
+function forgetPlace(): void {
+  anchor = undefined
+  cleanBack = undefined
+  expandBack = undefined
+  helpBack = 0
+}
+
 /** Opens the pane inside Claude Code, at its newest turn. */
 async function openInnerPane($: EngineInterface): Promise<void> {
+  forgetPlace()
   await update($, turnIndex, () => 0)
   await update($, isPromptExpanded, () => false)
   await update($, scrollRows, () => 0)
@@ -635,7 +671,7 @@ export const register: Register = on => {
   on('ui.close', async ($, e, next) => {
     if (e.id !== PANE || e.origin.kind !== 'person' || !(await read($, isHelpShown))) return next(e)
     await update($, isHelpShown, () => false)
-    await update($, scrollRows, () => 0)
+    await update($, scrollRows, () => helpBack)
     void refocus($)
     return { value: undefined }
   })
@@ -765,6 +801,12 @@ export const register: Register = on => {
     const calls = lines.flatMap(line => (line.call === undefined ? [] : [line.call]))
     const cursor = Math.min(await read($, cursorItem), Math.max(0, items.length - 1))
     const cursorCall = lines.find(line => line.item === cursor && line.call !== undefined)?.call
+    // A new width wraps the rows anew: the cursor's item stays on its row of the screen.
+    if (drawnWidth !== 0 && width !== drawnWidth && anchor === undefined) {
+      const was = itemRows.find(rows => rows.item === cursor)
+      if (was !== undefined) anchor = { start, offset: was.first - drawnScroll }
+    }
+    drawnWidth = width
     itemRows = []
     lines.forEach((line, at) => {
       if (line.item === undefined) return
@@ -772,6 +814,7 @@ export const register: Register = on => {
       if (rows?.item === line.item) rows.last = at
       else itemRows.push({ item: line.item, first: at, last: at })
     })
+    const cursorRows = itemRows.find(rows => rows.item === cursor)
     const isHelp = await read($, isHelpShown)
     if (isHelp) {
       lines.splice(0, lines.length, ...helpLines(inner))
@@ -794,11 +837,33 @@ export const register: Register = on => {
 
     windowRows = screenRows - (HEADER_ROWS - 1 + gapRows + titles.length)
     maxScroll = Math.max(0, lines.length - windowRows)
-    const scrolled = Math.min(await read($, scrollRows), maxScroll)
-    drawnScroll = scrolled
+    let scrolled = Math.min(await read($, scrollRows), maxScroll)
+    if (!isHelp && anchor?.start === start && cursorRows !== undefined) {
+      scrolled = Math.max(0, Math.min(maxScroll, cursorRows.first - anchor.offset))
+      // An item the change took out of the window is brought back: whole when it fits, else its top.
+      if (cursorRows.last < scrolled || cursorRows.first >= scrolled + windowRows) {
+        scrolled = Math.max(0, Math.min(maxScroll, Math.min(cursorRows.first, cursorRows.last - windowRows + 1)))
+      }
+    }
+    if (!isHelp) drawnScroll = scrolled
+    if (cleanBack !== undefined && cleanBack.after === undefined && cleanBack.start === start && cleanBack.wasClean !== isCleanView) {
+      cleanBack.after = { scroll: scrolled, cursor }
+    }
     const shown = lines.slice(scrolled, scrolled + windowRows)
 
+    /**
+     * Runs a change to the turn's rows, the cursor's item kept on the row of
+     * the screen it is on; false where there is no item to keep (the help, an
+     * empty turn).
+     */
+    const keepPlace = async (change: () => Promise<void>): Promise<boolean> => {
+      await settle($)
+      if (!isHelp && cursorRows !== undefined) anchor = { start, offset: cursorRows.first - scrolled }
+      await change()
+      return anchor !== undefined
+    }
     const go = (to: number) => async () => {
+      forgetPlace()
       await update($, turnIndex, () => Math.max(0, Math.min(prompts.length - 1, to)))
       await update($, isPromptExpanded, () => false)
       await update($, scrollRows, () => 0)
@@ -813,7 +878,9 @@ export const register: Register = on => {
       // and would have the first press fold where it is meant to open.
       const tools = kind === undefined ? group.filter(call => call.kind !== 'text') : []
       const isUnfolded = !(tools.length > 0 ? tools : group).some(call => call.isUnfolded)
-      for (const call of group) await update($, { ...turnOpen, id: call.id }, () => isUnfolded)
+      await keepPlace(async () => {
+        for (const call of group) await update($, { ...turnOpen, id: call.id }, () => isUnfolded)
+      })
     }
     const hasKind = (kind: CallKind) => calls.some(call => call.kind === kind)
     // Over a prompt box holding text the pane opens without the keyboard,
@@ -847,15 +914,23 @@ export const register: Register = on => {
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
           <Button key="expand" hotkey="e" plain onPress={async () => {
+            // The whole message is read from its top; folded again, the turn is where it was.
+            await settle($)
+            const back = isExpanded && expandBack?.start === start ? expandBack : undefined
+            expandBack = isExpanded || isHelp ? undefined : { start, scroll: scrolled, cursor }
             await update($, isPromptExpanded, was => !was)
-            await update($, scrollRows, () => 0)
+            if (back !== undefined) await update($, cursorItem, () => back.cursor)
+            await update($, scrollRows, () => back?.scroll ?? 0)
           }}>
             {isExpanded ? 'collapse' : 'expand'}
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
           <Button key="help" hotkey="h" plain onPress={async () => {
+            // The help opens at its top, over the turn; closed, the turn is where it was.
+            await settle($)
+            if (!isHelp) helpBack = scrolled
             await update($, isHelpShown, was => !was)
-            await update($, scrollRows, () => 0)
+            await update($, scrollRows, () => (isHelp ? helpBack : 0))
           }}>
             help
           </Button>
@@ -863,12 +938,13 @@ export const register: Register = on => {
           <Button key="close" hotkey="q" plain onPress={async () => {
             if (!isHelp) return $.ui.close({ id: PANE })
             await update($, isHelpShown, () => false)
-            await update($, scrollRows, () => 0)
+            await update($, scrollRows, () => helpBack)
           }}>
             close
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
           <Button key="toggleItem" hotkey="o" plain dimColor={cursorCall === undefined} onPress={async () => {
+            await settle($)
             if (cursorCall !== undefined) await update($, { ...turnOpen, id: cursorCall.id }, () => !cursorCall.isUnfolded)
           }}>
             {cursorCall?.isUnfolded === true ? 'fold' : 'open'}
@@ -886,12 +962,26 @@ export const register: Register = on => {
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
           <Button key="clean" hotkey="z" plain onPress={async () => {
-            await update($, isClean, was => !was)
-            // A cursor on a call now hidden comes to the reply after it, or the last.
-            const replies = items.flatMap((entry, at) => (typeof entry === 'string' ? [at] : []))
-            if (!isCleanView && typeof items[cursor] !== 'string') {
-              await update($, cursorItem, () => replies.find(at => at > cursor) ?? replies.at(-1) ?? 0)
+            const back = cleanBack
+            cleanBack = undefined
+            if (back !== undefined && back.start === start && back.after?.scroll === scrolled && back.after.cursor === cursor) {
+              // Nothing moved since: the turn is back where it was.
+              anchor = undefined
+              await update($, isClean, was => !was)
+              await update($, cursorItem, () => back.cursor)
+              await update($, scrollRows, () => back.scroll)
+              return
             }
+            cleanBack = { start, wasClean: isCleanView, scroll: scrolled, cursor }
+            const isKept = await keepPlace(async () => {
+              // A cursor on a call now hidden comes to the reply after it, or the last.
+              const replies = items.flatMap((entry, at) => (typeof entry === 'string' ? [at] : []))
+              if (!isCleanView && typeof items[cursor] !== 'string') {
+                await update($, cursorItem, () => replies.find(at => at > cursor) ?? replies.at(-1) ?? 0)
+              }
+              await update($, isClean, was => !was)
+            })
+            if (!isKept) cleanBack = undefined
           }}>
             {isCleanView ? 'full' : 'clean'}
           </Button>
@@ -986,6 +1076,7 @@ export const register: Register = on => {
                   plain
                   dimColor={!line.call.isUnfolded && line.call.kind !== 'text'}
                   onPress={((call, item) => async () => {
+                    await settle($)
                     if (item !== undefined) await update($, cursorItem, () => item)
                     await update($, { ...turnOpen, id: call.id }, () => !call.isUnfolded)
                   })(line.call, line.item)}

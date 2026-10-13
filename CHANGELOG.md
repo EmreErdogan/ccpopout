@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.5.0 — 2026-10-13
+
 ### Side pane, and the in-app pane in the fullscreen layout
 
 - The first row of the item the cursor moves to comes to the middle of the window, as far as the turn's start allows, however long the item is.

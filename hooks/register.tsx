@@ -46,6 +46,12 @@ let itemRows: { item: number; first: number; last: number }[] = []
 let drawnScroll = 0
 let drawnWidth = 0
 /**
+ * Of the turn last drawn: true in the fullscreen layout, where the cursor's
+ * item is held at the middle of the window and blank rows past the turn's
+ * last let the last item come there too.
+ */
+let isCentered = false
+/**
  * Held from a change to a turn's rows (a fold of many, the clean view, a new
  * width): how far down the window the cursor's item was. A draw is pure and
  * cannot move `scrollRows`, so each one places the window by this instead,
@@ -370,14 +376,25 @@ async function settle($: EngineInterface): Promise<void> {
 }
 
 /**
- * Moves the window `by` rows over the turn last drawn. A cursor it leaves out
- * of sight comes to the nearest item still in it: the top one going down, the
+ * Moves the window `by` rows over the turn last drawn. In the fullscreen
+ * layout the cursor comes to the item at the window's middle row, or the one
+ * nearest it (the one above, of two as near). Elsewhere a cursor left out of
+ * sight comes to the nearest item still in it: the top one going down, the
  * bottom one going up.
  */
 async function scrollWindow($: EngineInterface, by: number): Promise<void> {
   await settle($)
-  const to = scrolledBy(await read($, scrollRows), by)
+  const from = Math.min(await read($, scrollRows), maxScroll)
+  const to = scrolledBy(from, by)
   await update($, scrollRows, () => to)
+  if (isCentered) {
+    if (to === from) return
+    const middle = to + ((windowRows - 1) >> 1)
+    const away = (rows: { first: number; last: number }) => Math.max(rows.first - middle, middle - rows.last, 0)
+    const near = itemRows.reduce<(typeof itemRows)[number] | undefined>((best, rows) => (best === undefined || away(rows) < away(best) ? rows : best), undefined)
+    if (near !== undefined) await update($, cursorItem, () => near.item)
+    return
+  }
   const shown = itemRows.filter(rows => rows.last >= to && rows.first < to + windowRows)
   const cursor = await read($, cursorItem)
   if (shown.some(rows => rows.item === cursor)) return
@@ -454,13 +471,17 @@ async function flash($: EngineInterface, text: string): Promise<void> {
 
 /**
  * Moves the cursor an item up or down the turn last drawn, the window after
- * it: whole into view when the item fits, else its top.
+ * it. In the fullscreen layout the item's first row comes to the middle of
+ * the window. Elsewhere the item comes whole into view, or its top where it is
+ * taller.
  */
 async function moveCursor($: EngineInterface, step: number): Promise<void> {
   if (itemRows.length === 0) return
   await settle($)
+  // Read here, not as last drawn: a second arrow may come before the first is drawn.
+  const scroll = Math.min(await read($, scrollRows), maxScroll)
   const cursor = await read($, cursorItem)
-  const isShown = (rows: { first: number; last: number }) => rows.last >= drawnScroll && rows.first < drawnScroll + windowRows
+  const isShown = (rows: { first: number; last: number }) => rows.last >= scroll && rows.first < scroll + windowRows
   let at = itemRows.findIndex(rows => rows.item === cursor)
   if (at === -1 || !isShown(itemRows[at] as { first: number; last: number })) {
     // Scrolled out of sight: the cursor comes to what is on screen.
@@ -476,8 +497,9 @@ async function moveCursor($: EngineInterface, step: number): Promise<void> {
   const to = itemRows[at]
   if (to === undefined) return
   await update($, cursorItem, () => to.item)
-  if (to.first < drawnScroll) await update($, scrollRows, () => to.first)
-  else if (to.last >= drawnScroll + windowRows) await update($, scrollRows, () => Math.min(maxScroll, Math.min(to.first, to.last - windowRows + 1)))
+  if (isCentered) await update($, scrollRows, () => Math.max(0, Math.min(maxScroll, to.first - ((windowRows - 1) >> 1))))
+  else if (to.first < scroll) await update($, scrollRows, () => to.first)
+  else if (to.last >= scroll + windowRows) await update($, scrollRows, () => Math.min(maxScroll, Math.min(to.first, to.last - windowRows + 1)))
 }
 
 /** Lets go of what was kept of a turn's place: another turn is shown. */
@@ -836,7 +858,10 @@ export const register: Register = on => {
     const gapRows = e.props.placement === 'dock' && screenRows >= ROOMY_ROWS ? 1 : 0
 
     windowRows = screenRows - (HEADER_ROWS - 1 + gapRows + titles.length)
-    maxScroll = Math.max(0, lines.length - windowRows)
+    isCentered = e.props.placement === 'dock'
+    // Half a window of blank rows past the turn's last: the last item comes to the middle too.
+    const tailRows = isCentered && !isHelp ? windowRows >> 1 : 0
+    maxScroll = Math.max(0, lines.length + tailRows - windowRows)
     let scrolled = Math.min(await read($, scrollRows), maxScroll)
     if (!isHelp && anchor?.start === start && cursorRows !== undefined) {
       scrolled = Math.max(0, Math.min(maxScroll, cursorRows.first - anchor.offset))
@@ -889,14 +914,16 @@ export const register: Register = on => {
     const hint = flashed !== '' ? `── ${flashed} ` : e.props.isFocused ? '' : '── ctrl+x tab: keys here '
     // How many rows there are above and below the window, or that it is at an end.
     const below = lines.length - scrolled - shown.length
-    const range = maxScroll === 0 ? '' : ` ${scrolled === 0 ? 'top' : `↑ ${scrolled}`} · ${below <= 0 ? 'end' : `↓ ${below}`} `
+    // A turn the window holds whole shows neither: the blank rows past its end are all there is to scroll to.
+    const isWhole = lines.length <= windowRows
+    const range = isWhole ? '' : ` ${scrolled === 0 ? 'top' : `↑ ${scrolled}`} · ${below <= 0 ? 'end' : `↓ ${below}`} `
     // The scroll bar: the window's share of the rows, at its place among them.
-    const thumb = Math.max(1, Math.round((windowRows * windowRows) / Math.max(1, lines.length)))
+    const thumb = Math.max(1, Math.round((windowRows * windowRows) / Math.max(1, lines.length + tailRows)))
     const thumbAt = maxScroll === 0 ? 0 : Math.round((scrolled / maxScroll) * (windowRows - thumb))
     const bar = (at: number) => (
       <Box width={BAR} flexShrink={0}>
         <Text color={at >= thumbAt && at < thumbAt + thumb ? 'cyan' : undefined} dimColor={at < thumbAt || at >= thumbAt + thumb}>
-          {maxScroll === 0 ? ' ' : at >= thumbAt && at < thumbAt + thumb ? '┃' : '│'}
+          {isWhole ? ' ' : at >= thumbAt && at < thumbAt + thumb ? '┃' : '│'}
         </Text>
       </Box>
     )

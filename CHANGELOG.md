@@ -5,6 +5,13 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+### Side pane, and the in-app pane in the fullscreen layout
+
+- The first row of the item the cursor moves to comes to the middle of the window, as far as the turn's start allows, however long the item is.
+- Scrolling (`j`/`k`, `d`/`u`, the wheel) takes the cursor to the item at the window's middle row, or the one nearest it, not only when its item leaves the screen.
+- Half a window of blank rows follows the turn's end, so the last items come to the middle too. While `G` follows new output the window stays at the turn's last row.
+- A turn the window holds whole shows no scroll bar and no position in the rule, though those blank rows can be scrolled to.
+
 ## v0.4.1 — 2026-10-09
 
 ### Side pane

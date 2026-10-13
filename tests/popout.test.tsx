@@ -170,9 +170,9 @@ test('the pane folds and opens every call, or one kind, and shows its keys', asy
     await ui.press({ key: 'help' })
     expect(await ui.find({ text: /ccpopout 9\.8\.7 · Keys · h, q or esc returns/ })).toBeDefined()
     expect(await ui.find({ text: /the same for the diffs/ })).toBeDefined()
-    expect(await ui.find({ text: /Editing now/ })).toBeUndefined()
+    expect(await ui.find({ text: /Done editing/ })).toBeUndefined()
     await ui.press({ key: 'help' })
-    expect(await ui.find({ text: /Editing now/ })).toBeDefined()
+    expect(await ui.find({ text: /Done editing/ })).toBeDefined()
     // Back to how a turn starts, for the next surface.
     await ui.press({ key: 'foldAll' })
     await ui.press({ key: 'call:b2' })
@@ -190,8 +190,8 @@ test('a cursor the window leaves out of sight comes to the nearest item in it', 
     return { value: { isCopied: true } as never }
   })
 
-  // Six rows: three of header, three of body.
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 6 } } })
+  // Above the prompt. Six rows: three of header, three of body.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 6 } } })
   // A row down takes the first reply out of sight: the cursor comes to the Edit.
   await ui.press({ key: 'down' })
   await ui.press({ key: 'copy' })
@@ -301,6 +301,117 @@ test('the pane moves a cursor over the items, opens the one it is on and copies 
   await arrow(-1)
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe('Editing now.')
+  await ui.unmount()
+})
+
+test('in the fullscreen layout the cursor\'s item is held at the middle of the window', async ($, on) => {
+  // A reply, a blank row, forty folded calls: 42 rows.
+  const toolUses = Array.from({ length: 40 }, (_, at) => ({ tool_use_id: `c${at}`, tool: 'Bash', input: { command: `echo ${at}` }, text: `${at}` }))
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: 'a long turn', toolUses: [] },
+      { role: 'assistant', text: 'Start.', toolUses },
+    ],
+  }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } as never }
+  })
+  /** An arrow key, as the engine raises it at the pane. */
+  const arrow = (by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' } } as never)
+  const arrows = async (by: number, times: number) => {
+    for (let at = 0; at < times; at++) await arrow(by)
+  }
+
+  // Thirty rows: four of header, twenty-six of body, so twelve rows above the middle one.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Near the top there is nothing above to scroll to: the window stays.
+  await arrows(1, 11)
+  expect(await ui.find({ text: /top · ↓ 16/ })).toBeDefined()
+  // From there on each item comes to the middle row.
+  await arrows(1, 9)
+  expect(await ui.find({ text: /↑ 9 · ↓ 7/ })).toBeDefined()
+  // The last one too, over the blank rows past the turn's end.
+  await arrows(1, 20)
+  expect(await ui.find({ text: /↑ 29 · end/ })).toBeDefined()
+  expect(await ui.find({ text: /echo 39/ })).toBeDefined()
+  expect(await ui.find({ text: /echo 26/ })).toBeUndefined()
+  // The window goes no further than that.
+  await presses(ui, 'pageDown', 3)
+  expect(await ui.find({ text: /↑ 29 · end/ })).toBeDefined()
+  await arrows(-1, 40)
+  expect(await ui.find({ text: /top · ↓ 16/ })).toBeDefined()
+
+  // Scrolled, the cursor is on the item at the window's middle row: half a page down, that is row 13 + 12, the call `echo 23`.
+  await ui.press({ key: 'pageDown' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 23\n23')
+  await ui.press({ key: 'down' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 24\n24')
+  await presses(ui, 'pageUp', 2)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 10\n10')
+  await arrows(-1, 40)
+  await ui.unmount()
+
+  // Above the prompt the window moves only for an item out of sight, and ends with the turn.
+  const inline = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline' as const } })
+  await arrows(1, 20)
+  expect(await inline.find({ text: /top · ↓ 15/ })).toBeDefined()
+  await arrows(1, 20)
+  expect(await inline.find({ text: /↑ 15 · end/ })).toBeDefined()
+  await arrows(-1, 40)
+  await inline.unmount()
+})
+
+test('an item that reaches past the window is come to at its first row, from above and from below', async ($, on) => {
+  // A reply and a call (rows 0 to 3, with their blanks), a reply of fifty rows (4 to 53), a call (55).
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: 'a long reply', toolUses: [] },
+      { role: 'assistant', text: 'Start.', toolUses: [{ tool_use_id: 'c0', tool: 'Bash', input: { command: 'echo 0' }, text: '0' }] },
+      { role: 'assistant', text: Array.from({ length: 50 }, (_, at) => `Row ${at}.`).join('\n'), toolUses: [{ tool_use_id: 'c1', tool: 'Bash', input: { command: 'echo 1' }, text: '1' }] },
+    ],
+  }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } as never }
+  })
+  /** An arrow key, as the engine raises it at the pane. */
+  const arrow = (by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' } } as never)
+
+  // Twenty-six rows of body: the middle one has twelve above it.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const rule = async () => ((await ui.find({ text: /─── / }))?.text ?? '').match(/(top|↑ \d+) · (end|↓ \d+)/)?.[0]
+  const places: (string | undefined)[] = []
+  for (let at = 0; at < 3; at++) {
+    await arrow(1)
+    places.push(await rule())
+  }
+  // The call, the long reply (its first row above the middle already), and the call after it (55 - 12).
+  expect(places).toEqual(['top · ↓ 30', 'top · ↓ 30', '↑ 43 · end'])
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 1\n1')
+
+  // Back up: the reply again, at its first row, and the call before it.
+  places.length = 0
+  for (let at = 0; at < 2; at++) {
+    await arrow(-1)
+    places.push(await rule())
+  }
+  expect(places).toEqual(['top · ↓ 30', 'top · ↓ 30'])
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 0\n0')
+  await arrow(-1)
   await ui.unmount()
 })
 

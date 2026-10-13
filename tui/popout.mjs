@@ -1164,15 +1164,41 @@ class View {
     return rows
   }
 
-  get maxScroll() {
+  /** The blank rows past the turn's last: half a window, so the last item comes to the middle too. */
+  get tailRows() {
+    return this.isHelp ? 0 : this.windowRows >> 1
+  }
+
+  /** The window's place with the turn's last row at its foot: where following holds it. */
+  get endScroll() {
     return Math.max(0, this.build().length - this.windowRows)
   }
 
+  get maxScroll() {
+    return Math.max(0, this.build().length + this.tailRows - this.windowRows)
+  }
+
+  /** Moves the window `by` rows, the cursor to the item at its middle row. */
   scrollBy(by) {
     this.back = undefined
     const max = this.maxScroll
-    this.scroll = Math.max(0, Math.min(max, Math.min(this.scroll, max) + by))
-    this.isFollowing = by > 0 && this.isFollowing && this.scroll >= max
+    const from = Math.min(this.scroll, max)
+    this.scroll = Math.max(0, Math.min(max, from + by))
+    this.isFollowing = by > 0 && this.isFollowing && this.scroll >= this.endScroll
+    // Following, the window is held at the turn's end and the cursor where it is.
+    if (this.isHelp || this.isFollowing || this.scroll === from) return
+    this.cursor = this.middleItem() ?? this.cursor
+  }
+
+  /** The item at the middle row of the window, or the one nearest it (the one above, of two as near). */
+  middleItem() {
+    const rows = this.build()
+    const middle = this.scroll + ((this.windowRows - 1) >> 1)
+    for (let away = 0; away <= Math.max(middle, rows.length); away++) {
+      const item = rows[middle - away]?.item ?? rows[middle + away]?.item
+      if (item !== undefined) return item
+    }
+    return undefined
   }
 
   /** The call under the cursor when it folds; undefined on prose or a call with nothing to show. */
@@ -1200,6 +1226,19 @@ class View {
     if (first < scroll) this.scroll = first
     else if (last >= scroll + this.windowRows) this.scroll = Math.min(first, last - this.windowRows + 1)
     else return
+    this.isFollowing = false
+  }
+
+  /** The window's place with the first row of the item under the cursor at its middle. */
+  reach() {
+    const first = this.build().findIndex(line => line.item === this.cursor)
+    return Math.max(0, Math.min(this.maxScroll, first - ((this.windowRows - 1) >> 1)))
+  }
+
+  /** Moves the window to `to`, as the cursor's keys do: following ends where it moves. */
+  scrollTo(to) {
+    if (to === (this.isFollowing ? this.endScroll : Math.min(this.scroll, this.maxScroll))) return
+    this.scroll = to
     this.isFollowing = false
   }
 
@@ -1247,7 +1286,7 @@ class View {
     this.back = at
   }
 
-  /** Moves the cursor an item up or down. */
+  /** Moves the cursor an item up or down, the item's first row to the middle of the window. */
   move(step) {
     const rows = this.build()
     const items = [...new Set(rows.filter(line => line.item !== undefined).map(line => line.item))]
@@ -1259,7 +1298,7 @@ class View {
       const near = (step > 0 ? shown : shown.toReversed()).find(line => line.item !== undefined)
       if (near !== undefined) {
         this.cursor = near.item
-        return this.reveal()
+        return this.scrollTo(this.reach())
       }
     }
     const at = items.indexOf(this.cursor)
@@ -1268,10 +1307,13 @@ class View {
     else next = step > 0 ? items.findIndex(item => item > this.cursor) : items.findLastIndex(item => item < this.cursor)
     if (next < 0 || next >= items.length) {
       // At either end the window still moves, so the first and last rows are reached.
-      return this.scrollBy(step)
+      const { cursor } = this
+      this.scrollBy(step)
+      this.cursor = cursor
+      return
     }
     this.cursor = items[next]
-    this.reveal()
+    this.scrollTo(this.reach())
   }
 
   copy() {
@@ -1373,7 +1415,7 @@ class View {
       case 'G':
       case 'end':
         this.isFollowing = true
-        this.scroll = this.maxScroll
+        this.scroll = this.endScroll
         this.cursor = this.build().findLast(line => line.item !== undefined)?.item ?? 0
         return
       case 'enter':
@@ -1493,7 +1535,7 @@ class View {
     const width = this.columns
     const rows = this.build()
     const max = this.maxScroll
-    if (this.isFollowing) this.scroll = max
+    if (this.isFollowing) this.scroll = this.endScroll
     this.scroll = Math.max(0, Math.min(max, this.scroll))
     const shown = rows.slice(this.scroll, this.scroll + this.windowRows)
     // A cursor the window left out of sight comes to the nearest item still in
@@ -1538,12 +1580,14 @@ class View {
     // The rule, with where the window is: in the tool color, to be read among the dashes.
     // How many rows there are above and below the window, or that it is at an end.
     const below = rows.length - this.scroll - shown.length
-    const range = max === 0 ? '' : ` ${this.scroll === 0 ? 'top' : `↑ ${this.scroll}`} · ${below <= 0 ? 'end' : `↓ ${below}`} `
+    // A turn the window holds whole shows neither: the blank rows past its end are all there is to scroll to.
+    const isWhole = rows.length <= this.windowRows
+    const range = isWhole ? '' : ` ${this.scroll === 0 ? 'top' : `↑ ${this.scroll}`} · ${below <= 0 ? 'end' : `↓ ${below}`} `
     // The scroll bar: the window's share of the rows, at its place among them.
-    const thumb = Math.max(1, Math.round((this.windowRows * this.windowRows) / Math.max(1, rows.length)))
+    const thumb = Math.max(1, Math.round((this.windowRows * this.windowRows) / Math.max(1, rows.length + this.tailRows)))
     const thumbAt = max === 0 ? 0 : Math.round((this.scroll / max) * (this.windowRows - thumb))
     const bar = at =>
-      max === 0 ? '' : `${ESC}[${width}G${RESET}${at >= thumbAt && at < thumbAt + thumb ? `${ESC}[${S.cyan}m┃` : `${ESC}[${sgr(S.gray, S.dim)}m│`}${RESET}`
+      isWhole ? '' : `${ESC}[${width}G${RESET}${at >= thumbAt && at < thumbAt + thumb ? `${ESC}[${S.cyan}m┃` : `${ESC}[${sgr(S.gray, S.dim)}m│`}${RESET}`
     const live = this.notice !== '' ? this.notice : this.isFollowing ? ' following ' : ''
     // And the day the window's top row was written on, when that is not today.
     const top = this.isHelp ? undefined : (shown.find(line => line.time !== undefined) ?? rows.slice(0, this.scroll).findLast(line => line.time !== undefined))

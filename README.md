@@ -140,10 +140,20 @@ drawn in gray italics.
 The in-app pane has fewer keys because Claude Code lets a plugin bind only
 single lowercase letters there.
 
-The cursor (`▌`) stays in sight: when scrolling takes its item off the screen
-it comes to the nearest one still there, the top item going down and the bottom
-one going up. `g` and `G` take it to the first and the last item; while `G`
-follows new output, a cursor left on the last item moves on to each new one.
+The cursor (`▌`) stays in sight: in the in-app pane above the prompt, when
+scrolling takes its item off the screen it comes to the nearest one still
+there, the top item going down and the bottom one going up. `g` and `G` take it
+to the first and the last item; while `G` follows new output, a cursor left on
+the last item moves on to each new one.
+
+In the side pane, and in the in-app pane under Claude Code's fullscreen layout,
+the row at the middle of the window is the one being read. `↑` and `↓` bring
+the first row of the item the cursor moves to there, however long the item is;
+the rest of a long one is read by scrolling. Scrolling (`j`/`k`, `d`/`u`, the
+wheel) takes the cursor to the item at the middle row, or the one nearest it.
+Half a window of blank rows past the turn's end lets the last items come to the
+middle too; a turn the window holds whole shows no scroll bar or position for
+them. Following new output (`G`), the window stays at the turn's last row.
 
 The turn keeps its place when its rows change: after the clean view (`z`),
 hiding the thinking (`t`), opening or folding many at once (`a`, `f`, `b`, `r`)

@@ -7,19 +7,7 @@ pops the session out of the transcript into a view of its own: pick one of your
 messages and see what Claude did since, with every tool call folded to one line
 until you open it.
 
-```
- p ◂ older  n newer ▸  e expand  a open all  A fold all  z clean  t hide 💭  ? help  q close
-
- 7/12 › the header disappears when I scroll to the bottom
-──────────────────────────────────────────────────────────────── top · ↓ 31 ──
-▌ ● You're right. I'll run the pane in a real terminal first and read the      ┃
-▌   screen, then fix it there.                                                 ┃
-                                                                               ┃
-  ▸ Bash(tmux new-session -d -s qt -x 100 -y 40 …) · 20 lines                  │
-  ▸ Edit(hooks/register.tsx) · +14 −6                                          │
-  ▾ Bash(claude plugin test .) · error                                         │
-      1 fail                                                                   │
-```
+![ccpopout side pane beside Claude Code](docs/demo.gif)
 
 It comes in two forms that behave the same:
 

@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.5.1 — 2026-10-20
+
 ### Side pane
 
 - After a rewind (esc esc, then restore), the conversation goes on from the point it was rewound to: what came after it leaves the pane once the next message is sent.

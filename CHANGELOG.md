@@ -5,6 +5,11 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+### Side pane
+
+- After a rewind (esc esc, then restore), the conversation goes on from the point it was rewound to: what came after it leaves the pane once the next message is sent.
+- Claude's thinking is drawn in a lighter gray, near the replies' own.
+
 ## v0.5.0 — 2026-10-13
 
 ### Side pane, and the in-app pane in the fullscreen layout

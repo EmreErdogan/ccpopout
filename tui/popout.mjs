@@ -666,6 +666,12 @@ function promptText(text) {
   return text.replace(/<([a-z][a-z0-9-]*)>[\s\S]*?<\/\1>/g, '').trim()
 }
 
+/** A user row that carries tool results, not a prompt. */
+function isResult(record) {
+  const content = record.message.content
+  return record.type === 'user' && Array.isArray(content) && content.some(block => block?.type === 'tool_result')
+}
+
 function blockText(content) {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
@@ -688,6 +694,14 @@ class Transcript {
     this.entries = []
     this.calls = new Map()
     this.prompts = []
+    /** Each row's parent, uuid to uuid: the rows of a conversation form a tree. */
+    this.parents = new Map()
+    /** The user and assistant rows taken, all branches', for a branch to be shown again. */
+    this.records = []
+    /** The last prompt or reply row taken: the branch shown ends there. */
+    this.last = undefined
+    /** Set when another branch took the shown one's place; the view clears it. */
+    this.isBranched = false
   }
 
   /**
@@ -735,12 +749,7 @@ class Transcript {
     this.seededSize = size
     const { seeded } = this
     this.seeded = undefined
-    this.entries = []
-    this.calls = new Map()
-    this.prompts = []
-    this.offset = 0
-    this.partial = ''
-    this.seen = new Set()
+    this.reset()
     this.read()
     if (this.prompts.length > 0) return true
     this.seed(seeded)
@@ -786,12 +795,56 @@ class Transcript {
   }
 
   take(record) {
-    if (record.isSidechain === true || record.message === undefined) return false
+    if (record.isSidechain === true) return false
+    // A compaction's boundary has no parent; the row it follows is its logical one.
+    if (record.uuid !== undefined) this.parents.set(record.uuid, record.parentUuid ?? record.logicalParentUuid)
+    if (record.message === undefined) return false
     if (record.type !== 'user' && record.type !== 'assistant') return false
     if (record.uuid !== undefined) {
       if (this.seen.has(record.uuid)) return false
       this.seen.add(record.uuid)
     }
+    this.records.push(record)
+    // A tool's result hangs off its call, beside the rows that follow: it
+    // starts no branch, and finds its call by id on whichever branch is shown.
+    // A prompt or reply that does not follow the last one does: the
+    // conversation was rewound to its parent, and goes on from there.
+    if (record.uuid !== undefined && !isResult(record)) {
+      if (this.last !== undefined && !this.descends(record.uuid, this.last)) {
+        this.branch(record.uuid)
+        return true
+      }
+      this.last = record.uuid
+    }
+    return this.show(record)
+  }
+
+  /** Whether `ancestor` is `uuid` or one of its parents. */
+  descends(uuid, ancestor) {
+    const passed = new Set()
+    for (let at = uuid; at != null && !passed.has(at); at = this.parents.get(at)) {
+      if (at === ancestor) return true
+      passed.add(at)
+    }
+    return false
+  }
+
+  /** Shows the branch that ends at `leaf` in the place of the one shown. */
+  branch(leaf) {
+    const chain = new Set()
+    for (let at = leaf; at != null && !chain.has(at); at = this.parents.get(at)) chain.add(at)
+    this.entries = []
+    this.calls = new Map()
+    this.prompts = []
+    for (const record of this.records) {
+      if (record.uuid === undefined || isResult(record) || chain.has(record.uuid)) this.show(record)
+    }
+    this.last = leaf
+    this.isBranched = true
+  }
+
+  /** Puts a user or assistant row in the entries; true when it added or answered one. */
+  show(record) {
     const content = record.message.content
     const time = Date.parse(record.timestamp)
 
@@ -1028,9 +1081,17 @@ class View {
   }
 
   changed() {
-    if (this.isNewest) {
+    // On another branch the turns and items are others: the newest is shown
+    // from its top, and the replies' folds, kept by place, are dropped.
+    const isBranched = this.transcript.isBranched
+    this.transcript.isBranched = false
+    if (isBranched) {
+      for (const id of this.folds.keys()) if (id.startsWith('text:')) this.folds.delete(id)
+      this.rows = undefined
+    }
+    if (this.isNewest || isBranched) {
       const newest = Math.max(0, this.count - 1)
-      if (newest !== this.turn) this.show(newest)
+      if (newest !== this.turn || isBranched) this.show(newest)
     }
     // Following, a cursor on the last item stays on the last as more arrives.
     const lastItem = rows => rows?.findLast(line => line.item !== undefined)?.item

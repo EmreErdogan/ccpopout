@@ -52,8 +52,10 @@ const S = {
   cyan: '36',
   gray: '90',
   tool: '94',
-  /** A gray of its own, for what is read but stands back (a time, Claude's thinking, where the window is): the theme's (`gray`) is too faint. */
+  /** A gray of its own, for what is read but stands back (a time, where the window is): the theme's (`gray`) is too faint. */
   stamp: '38;5;245',
+  /** Claude's thinking: near the plain text, set apart by its italics more than its color. */
+  thought: '38;5;251',
   headerBg: '48;5;237',
   hoverBg: '48;5;240',
   addBg: '48;5;22',
@@ -1121,7 +1123,7 @@ class View {
         const foldedMark = isThinking ? `▸ ${mark}` : '▸ '
         const foldedPad = ' '.repeat(textWidth(foldedMark))
         let prose = proseRows(entry.text, width - foldedPad.length)
-        if (isThinking) prose = prose.map(line => ({ ...line, segs: line.segs.map(seg => ({ ...seg, s: sgr(S.stamp, S.italic, seg.s) })) }))
+        if (isThinking) prose = prose.map(line => ({ ...line, segs: line.segs.map(seg => ({ ...seg, s: sgr(S.thought, S.italic, seg.s) })) }))
         const id = `text:${first + 1 + item}`
         const isUnfolded = this.folds.get(id) ?? true
         const fold = prose.length > FOLDED_ROWS ? { id, isUnfolded, kind: 'text' } : undefined

@@ -32,8 +32,12 @@ const TITLE_ROWS = 3
 const ROOMY_ROWS = 16
 /** The turns program a multiplexer's pane runs, under the plugin's root. */
 const TUI = 'tui/popout.mjs'
-/** From this many columns the side pane splits off to the right; below, it opens zoomed. */
+/** From this many columns the side pane splits off to one side; below, it opens zoomed. */
 const WIDE_COLUMNS = 140
+
+type Side = 'right' | 'left'
+/** The side `/popout side` opens on: the plugin's `side` setting, read at load. */
+let settingSide: Side = 'right'
 
 /**
  * The scroll bounds of the turn last drawn, for the handlers that move
@@ -566,14 +570,22 @@ async function closeSidePane($: EngineInterface): Promise<boolean> {
   return (await stdoutOf($, argv)) !== undefined
 }
 
+/** A side asked for by name, else `CCPOPOUT_SIDE`, else the plugin's setting. */
+async function sideOf($: EngineInterface, asked: Side | undefined): Promise<Side> {
+  if (asked !== undefined) return asked
+  const env = (await $.env.get('CCPOPOUT_SIDE'))?.trim().toLowerCase()
+  return env === 'left' || env === 'right' ? env : settingSide
+}
+
 /**
  * Opens the popout program in a pane of the terminal multiplexer this session
- * runs in: beside Claude Code where there is room, zoomed over it otherwise.
+ * runs in: beside Claude Code, on `side`, where there is room, zoomed over it
+ * otherwise.
  *
  * @returns '' once it is open (or was, and now has focus), 'none' where there
  *          is no multiplexer, else what went wrong
  */
-async function openSidePane($: EngineInterface): Promise<string> {
+async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   const open = await read($, sidePane)
   if (open !== null && (await isSidePaneAlive($, open))) {
     if (open.mux === 'tmux') await stdoutOf($, ['tmux', 'select-pane', '-t', open.id])
@@ -613,9 +625,13 @@ async function openSidePane($: EngineInterface): Promise<string> {
       const panes: { pane_id: string; rect: { width: number } }[] = layout.result?.layout?.panes ?? []
       columns = panes.find(pane => pane.pane_id === from)?.rect.width ?? 0
     } catch {}
-    const direction = columns >= WIDE_COLUMNS ? 'right' : 'down'
+    const direction = columns >= WIDE_COLUMNS ? side : 'down'
 
-    const split = await stdoutOf($, [herdr, 'pane', 'split', from, '--direction', direction, '--ratio', '0.5', '--cwd', cwd, '--focus'])
+    // herdr splits only right or down: a left pane is a right one swapped
+    // over, the new pane the source so that it keeps the focus.
+    const split = await stdoutOf($, [
+      herdr, 'pane', 'split', from, '--direction', direction === 'left' ? 'right' : direction, '--ratio', '0.5', '--cwd', cwd, '--focus',
+    ])
     let id: unknown
     try {
       id = JSON.parse(split ?? '{}').result?.pane?.pane_id
@@ -627,6 +643,7 @@ async function openSidePane($: EngineInterface): Promise<string> {
       await stdoutOf($, [herdr, 'pane', 'close', id])
       return 'herdr could not start the program'
     }
+    if (direction === 'left') await stdoutOf($, [herdr, 'pane', 'swap', '--source-pane', id, '--target-pane', from])
     if (direction === 'down') await stdoutOf($, [herdr, 'pane', 'zoom', id, '--on'])
     const pane: SidePane = { mux: 'herdr', id, from, direction }
     await update($, sidePane, () => pane)
@@ -636,10 +653,9 @@ async function openSidePane($: EngineInterface): Promise<string> {
   const from = (await $.env.get('TMUX_PANE')) ?? ''
   const target = from === '' ? [] : ['-t', from]
   const columns = Number((await stdoutOf($, ['tmux', 'display-message', '-p', ...target, '#{pane_width}']))?.trim() ?? 0)
-  const direction = columns >= WIDE_COLUMNS ? 'right' : 'down'
-  const split = await stdoutOf($, [
-    'tmux', 'split-window', direction === 'right' ? '-h' : '-v', '-P', '-F', '#{pane_id}', '-c', cwd, ...target, ...program,
-  ])
+  const direction = columns >= WIDE_COLUMNS ? side : 'down'
+  const placed = { right: ['-h'], left: ['-h', '-b'], down: ['-v'] }[direction]
+  const split = await stdoutOf($, ['tmux', 'split-window', ...placed, '-P', '-F', '#{pane_id}', '-c', cwd, ...target, ...program])
   const id = split?.trim() ?? ''
   if (id === '') return 'tmux could not split the pane'
   if (direction === 'down') await stdoutOf($, ['tmux', 'resize-pane', '-Z', '-t', id])
@@ -649,26 +665,38 @@ async function openSidePane($: EngineInterface): Promise<string> {
 }
 
 /** `/popout side`: the side pane, or the pane inside where no multiplexer is. */
-async function showSidePane($: EngineInterface): Promise<void> {
-  const failure = await openSidePane($)
+async function showSidePane($: EngineInterface, asked?: Side): Promise<void> {
+  const failure = await openSidePane($, await sideOf($, asked))
   if (failure === '') return
   $.ui.toast(failure === 'none' ? 'popout: no herdr or tmux here, opened inside instead' : `popout: ${failure}, opened inside instead`)
   await openInnerPane($)
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  if (options.side === 'left' || options.side === 'right') settingSide = options.side
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'popout',
       description: 'Read the session: what Claude did since each of your messages',
-      argumentHint: '[side|close]',
+      argumentHint: '[side|left|right|close]',
       immediate: true,
     })
-    // `/popout side` under a name of its own: a key binds to a command, not to
-    // its arguments.
+    // `/popout side`, `left` and `right` under names of their own: a key binds
+    // to a command, not to its arguments.
     await $.command.register({
       name: 'popout-side',
       description: 'Read the session in a herdr or tmux pane beside Claude Code',
+      immediate: true,
+    })
+    await $.command.register({
+      name: 'popout-left',
+      description: 'Read the session in a herdr or tmux pane left of Claude Code',
+      immediate: true,
+    })
+    await $.command.register({
+      name: 'popout-right',
+      description: 'Read the session in a herdr or tmux pane right of Claude Code',
       immediate: true,
     })
     return next(e)
@@ -677,15 +705,24 @@ export const register: Register = on => {
   on('command.run', { command: 'popout' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'side') await showSidePane($)
+    else if (arg === 'left' || arg === 'right') await showSidePane($, arg)
     else if (arg === 'close') {
       if (!(await closeSidePane($))) $.ui.toast('popout: no side pane is open')
-    } else if (arg !== '') return { text: `Usage: /popout [side|close] (got "${e.args.trim()}")` }
+    } else if (arg !== '') return { text: `Usage: /popout [side|left|right|close] (got "${e.args.trim()}")` }
     else await openInnerPane($)
     return {}
   })
 
   on('command.run', { command: 'popout-side' }, async $ => {
     await showSidePane($)
+    return {}
+  })
+  on('command.run', { command: 'popout-left' }, async $ => {
+    await showSidePane($, 'left')
+    return {}
+  })
+  on('command.run', { command: 'popout-right' }, async $ => {
+    await showSidePane($, 'right')
     return {}
   })
 

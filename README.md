@@ -71,9 +71,27 @@ The help (`h`) names the version a session runs, in its first row:
 | Command | What it does |
 | --- | --- |
 | `/popout` | Opens the in-app pane on your newest message. |
-| `/popout side` | Opens the side pane in herdr or tmux. Beside Claude Code when the terminal is at least 140 columns wide, otherwise zoomed over it. |
+| `/popout side` | Opens the side pane in herdr or tmux. Beside Claude Code when the terminal is at least 140 columns wide (on the right, unless [set](#side-pane-side) otherwise), otherwise zoomed over it. |
+| `/popout left`, `/popout right` | Opens the side pane on that side of Claude Code, whatever the setting. |
 | `/popout close` | Closes the side pane. |
-| `/popout-side` | The same as `/popout side`, as a command of its own so a key can be bound to it. |
+| `/popout-side`, `/popout-left`, `/popout-right` | The same as `/popout side`, `left` and `right`, as commands of their own so a key can be bound to them. |
+
+### Side pane side
+
+`/popout side` and `/popout-side` open the side pane on the right of Claude
+Code. To have them open it on the left, set the plugin's `side` option to
+`left`: in `/config`, or in `~/.claude/settings.json`:
+
+```json
+{
+  "pluginConfigs": {
+    "ccpopout@ccpopout": { "options": { "side": "left" } }
+  }
+}
+```
+
+The environment variable `CCPOPOUT_SIDE=left` (or `right`) does the same, and
+wins over the setting.
 
 ### Key bindings
 
@@ -87,7 +105,8 @@ to `~/.claude/keybindings.json` (merge it with what is already there):
       "context": "Chat",
       "bindings": {
         "ctrl+x r": "command:popout",
-        "ctrl+x t": "command:popout-side"
+        "ctrl+x t": "command:popout-side",
+        "ctrl+x l": "command:popout-left"
       }
     }
   ]

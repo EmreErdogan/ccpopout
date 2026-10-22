@@ -10,5 +10,14 @@
   "repository": "https://github.com/EmreErdogan/ccpopout",
   "license": "MIT",
   "keywords": ["session", "transcript", "reader", "tui", "tmux", "herdr"],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "side": {
+      "type": "string",
+      "title": "Side pane side",
+      "description": "Where /popout side and /popout-side open the side pane, beside Claude Code. The CCPOPOUT_SIDE environment variable, when set to left or right, overrides it.",
+      "default": "right",
+      "options": ["right", "left"]
+    }
+  }
 }

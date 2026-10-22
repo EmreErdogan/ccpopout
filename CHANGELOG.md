@@ -5,6 +5,11 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+### Side pane
+
+- It opens on the left of Claude Code too: `/popout left` or `/popout-left`. `/popout right` and `/popout-right` open it on the right.
+- A `side` setting (`/config`, or `pluginConfigs` in settings.json) and the `CCPOPOUT_SIDE` environment variable set the side `/popout side` and `/popout-side` open it on; the default is still the right.
+
 ## v0.5.1 — 2026-10-20
 
 ### Side pane

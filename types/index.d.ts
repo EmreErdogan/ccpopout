@@ -3,7 +3,7 @@ export type SidePane = {
   mux: 'herdr' | 'tmux'
   id: string
   from: string
-  direction: 'right' | 'down'
+  direction: 'right' | 'left' | 'down'
 }
 
 declare module 'claude-code' {

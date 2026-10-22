@@ -579,6 +579,40 @@ test('/popout side uses tmux where herdr is not running', async ($, on) => {
   expect(split.some(arg => arg.endsWith('/tui/popout.mjs'))).toBe(true)
 })
 
+const HERDR_WIDE = (argv: readonly string[]) => {
+  if (argv[0] === 'node') return '/usr/bin/node\n'
+  if (argv[2] === 'layout') return JSON.stringify({ result: { layout: { panes: [{ pane_id: 'w1:p1', rect: { width: 200 } }] } } })
+  if (argv[2] === 'split') return JSON.stringify({ result: { pane: { pane_id: 'w1:p2' } } })
+  if (argv[2] === 'get') return undefined
+  return '{}'
+}
+
+test('/popout left splits a herdr pane to the right and swaps it over', async ($, on) => {
+  const { ran } = host(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, HERDR_WIDE)
+  await $.command.run(typed('popout', 'left'))
+  expect(ran.find(argv => argv[2] === 'split')?.[5]).toBe('right')
+  expect(ran.find(argv => argv[2] === 'swap')).toEqual(['herdr', 'pane', 'swap', '--source-pane', 'w1:p2', '--target-pane', 'w1:p1'])
+})
+
+test('the side setting opens the side pane on the left, and /popout-right still on the right', { options: { side: 'left' } }, async ($, on) => {
+  const { ran } = host(on, { TMUX: '/tmp/tmux-1000/default,1,0', TMUX_PANE: '%3' }, argv => {
+    if (argv[0] === 'node') return '/usr/bin/node\n'
+    if (argv[1] === 'display-message') return '180\n'
+    if (argv[1] === 'split-window') return '%7\n'
+    return ''
+  })
+  await $.command.run(typed('popout-side'))
+  expect(ran.filter(argv => argv[1] === 'split-window').at(-1)?.slice(2, 4)).toEqual(['-h', '-b'])
+  await $.command.run(typed('popout-right'))
+  expect(ran.filter(argv => argv[1] === 'split-window').at(-1)?.slice(2, 4)).toEqual(['-h', '-P'])
+})
+
+test('CCPOPOUT_SIDE overrides the side setting', { options: { side: 'left' } }, async ($, on) => {
+  const { ran } = host(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', CCPOPOUT_SIDE: 'right' }, HERDR_WIDE)
+  await $.command.run(typed('popout', 'side'))
+  expect(ran.some(argv => argv[2] === 'swap')).toBe(false)
+})
+
 test('/popout side falls back to the pane inside where there is no multiplexer', async ($, on) => {
   const { ran, toasts, opened } = host(on, {}, () => '')
   await $.command.run(typed('popout', 'side'))

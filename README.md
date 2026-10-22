@@ -64,7 +64,7 @@ If an open session still shows the old version, run `/reload-plugins` there,
 or start a new session.
 
 The help (`h`) names the version a session runs, in its first row:
-`ccpopout 0.5.1 · Keys · …`.
+`ccpopout 0.6.0 · Keys · …`.
 
 ## Commands
 

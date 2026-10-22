@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.6.0 — 2026-10-22
+
 ### Side pane
 
 - It opens on the left of Claude Code too: `/popout left` or `/popout-left`. `/popout right` and `/popout-right` open it on the right.

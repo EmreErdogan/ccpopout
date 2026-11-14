@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.7.0 — 2026-11-14
+
 ### Both panes
 
 - They open in the clean view, tool calls hidden. A `clean` setting (`/config`, or `pluginConfigs` in settings.json) opens them in the full view instead.

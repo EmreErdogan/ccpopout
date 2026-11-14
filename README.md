@@ -93,6 +93,25 @@ Code. To have them open it on the left, set the plugin's `side` option to
 The environment variable `CCPOPOUT_SIDE=left` (or `right`) does the same, and
 wins over the setting.
 
+### Clean view
+
+Both panes open in the clean view (`z`, tool calls hidden). The view you
+choose with `z` (and, in the side pane, whether Claude's thinking is hidden,
+`t`) is kept: every pane opens in it after, in every session. The plugin's
+`clean` option, in `/config` or in settings.json, names the view the panes open
+in until you choose one:
+
+```json
+{
+  "pluginConfigs": {
+    "ccpopout@ccpopout": { "options": { "clean": false } }
+  }
+}
+```
+
+The choice is kept in `ccpopout-state.json` in the Claude config directory;
+remove that file to go back to the setting.
+
 ### Key bindings
 
 A plugin cannot add key bindings for you. To open ccpopout with a key, add this
@@ -130,7 +149,7 @@ drawn in gray italics.
 | Previous / next item | `↑` / `↓`, `shift+tab` / `tab` | `↑` / `↓` |
 | Open / fold the item | `→` / `←`, `o`, `enter`, click | `o`, click |
 | Copy the item | `c` | `c` |
-| Scroll a row | `k` / `j`, wheel | `k` / `j`, wheel |
+| Scroll a row | `k` / `j`, wheel (a row for each step the terminal sends) | `k` / `j`, wheel |
 | Scroll half a page | `K` / `J`, `u` / `d`, `PgUp` / `PgDn`, `space` | `u` / `d` |
 | Top / bottom | `g` / `G` (`G` also follows new output) | |
 | Open / fold everything: tool calls, replies, thinking | `a` / `A` | `a` (toggles) |
@@ -140,6 +159,7 @@ drawn in gray italics.
 | Clean view: hide the tool calls | `z` | `z` |
 | Hide / show Claude's thinking (`💭`) | `t` | |
 | Select text, copied when the button is let go | drag | |
+| Select a word, and copy it | double click | |
 | Mouse off / on, for the terminal's own selection | `m` | |
 | Help | `?` or `h` | `h` |
 | Close | `q` or `esc` | `q` or `esc` |
@@ -153,14 +173,29 @@ there, the top item going down and the bottom one going up. `g` and `G` take it
 to the first and the last item; while `G` follows new output, a cursor left on
 the last item moves on to each new one.
 
-In the side pane, and in the in-app pane under Claude Code's fullscreen layout,
-the row at the middle of the window is the one being read. `↑` and `↓` bring
-the first row of the item the cursor moves to there, however long the item is;
-the rest of a long one is read by scrolling. Scrolling (`j`/`k`, `d`/`u`, the
-wheel) takes the cursor to the item at the middle row, or the one nearest it.
-Half a window of blank rows past the turn's end lets the last items come to the
-middle too; a turn the window holds whole shows no scroll bar or position for
-them. Following new output (`G`), the window stays at the turn's last row.
+The cursor marks the item being read. In the side pane, and in the in-app pane
+under Claude Code's fullscreen layout, the row being read is two rows above the
+middle of the window, where the eye rests. `↑` and `↓` bring the first row of
+the item the cursor moves to there, however long the item is; the rest of a
+long one is read by scrolling. Scrolling (`j`/`k`, `d`/`u`, the wheel) takes
+the cursor to the item at the row being read, or the one nearest it.
+At the top of a turn, where the window has not moved, `j` (or the wheel down)
+takes the cursor to the next item, the window still, until it has come to the
+row being read, and `k` (or the wheel up) takes it to the item before. Blank rows past the turn's end let the last items
+come to that row too; a turn the window holds whole shows no scroll bar or
+position for them. Following new output (`G`), the window stays at the turn's
+last row.
+
+The header shows the first two rows of your message. `e`, or a press on it,
+shows it whole at the top of the turn, on the header's ground; a press on it
+there, or `e` again, folds it.
+
+The rule under the header counts the items the turn shows, tool calls hidden
+by the clean view or thinking hidden by `t` not counted, and says which one the
+cursor is on: `▌ 3/12`.
+
+Each turn keeps its place: going to another message (`p`, `n`) and back, the
+cursor is on the item it was on, and that item on the same row of the screen.
 
 The turn keeps its place when its rows change: after the clean view (`z`),
 hiding the thinking (`t`), opening or folding many at once (`a`, `f`, `b`, `r`)
@@ -169,7 +204,8 @@ and `t` pressed again with nothing done between return exactly to where the
 turn was, and so does closing the whole message (`e`) or the help.
 
 In the side pane each reply and each tool call ends with the time it was
-written to the transcript, in your local time. In the clean view the row
+written to the transcript, in your local time, and the header's message with
+the time it was sent (its day too, when not today). In the clean view the row
 standing for a run of hidden tool calls ends with the time of its first and of
 its last. The times say no day: the rule under the header names the day
 the window's top row was written on when that is not today, a rule across the
@@ -193,6 +229,12 @@ sequence, which your terminal and multiplexer must allow.
   message. For that case the plugin hands the side pane a snapshot of the
   conversation in a temporary file in the Claude config directory, which the
   side pane deletes as soon as it has read it.
+- While a dialog waits for you (a question Claude asks, a permission), Claude
+  Code writes nothing of the turn to the transcript. For that while the plugin
+  hands the side pane the turn as the session holds it, in a temporary file in
+  the Claude config directory (`ccpopout-live-<session>.json`), which the side
+  pane deletes once the transcript has caught up, or when it closes. Times show
+  on those items once the transcript has them.
 - After `/clear` or anything else that gives the session a new id, close the
   side pane and open it again.
 - Conversations rewound to an earlier point show the abandoned branches too.

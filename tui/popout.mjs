@@ -4,10 +4,17 @@
 // session's transcript file.
 //
 //   node popout.mjs <transcript.jsonl>
-//   node popout.mjs --session <id> [--cwd <dir>] [--snapshot <messages.json>] [--clean]
+//   node popout.mjs --session <id> [--cwd <dir>] [--snapshot <messages.json>] [--live <messages.json>] [--clean|--full]
 //
 // A session just resumed has its history in memory only, its file filled at
 // the next message: until then the view shows the snapshot its opener wrote.
+// While a dialog waits for the person (a question, a permission) the session
+// writes nothing to its file: the opener's live file holds what it has not
+// written yet, at the end of the newest turn.
+//
+// The clean view and the hidden thinking are kept between runs, in a file of
+// ccpopout's own in the Claude config directory; `--clean` and `--full` say
+// which view a first run starts in (clean when neither is given).
 //
 // No dependencies: plain ANSI on the alternate screen.
 
@@ -22,10 +29,15 @@ const MAX_TEXT = 200000
 /** Most rows one unfolded tool result shows; the rest is counted, not drawn. */
 const MAX_BODY_LINES = 2000
 /** Most rows of the message the header shows; `e` shows it whole. */
-const TITLE_ROWS = 3
+const TITLE_ROWS = 2
 /** Below this many terminal rows the header keeps to one row of the message. */
 const ROOMY_ROWS = 16
-const WHEEL_ROWS = 3
+/** A terminal sends a few wheel events to a notch: a row each makes about three to the notch. */
+const WHEEL_ROWS = 1
+/** How many rows above the window's middle the row being read is: about where the eye rests. */
+const READ_LIFT = 2
+/** Two presses of the button this close in time, in one cell, are a double click. */
+const DOUBLE_CLICK_MS = 400
 /** The rows of a folded reply that stay in view. */
 const FOLDED_ROWS = 2
 /** The cells left of the turn's rows, where the cursor's bar is drawn. */
@@ -680,9 +692,12 @@ function blockText(content) {
 
 /** The conversation read off a transcript file, kept current by `poll`. */
 class Transcript {
-  constructor(resolve) {
+  constructor(resolve, liveFile) {
     this.resolve = resolve
     this.file = undefined
+    this.liveFile = liveFile
+    /** Entries the live file has and the transcript not yet, of its newest turn. */
+    this.live = []
     this.reset()
   }
 
@@ -710,35 +725,69 @@ class Transcript {
    */
   seed(messages) {
     this.seeded = messages
-    this.entries = []
+    this.entries = sessionEntries(messages)
     this.calls = new Map()
     this.prompts = []
-    for (const message of messages) {
-      if (message.role === 'user') {
-        const text = (message.toolResults?.length ?? 0) > 0 ? '' : promptText(message.text ?? '')
-        if (text === '') continue
-        this.prompts.push(this.entries.length)
-        this.entries.push({ kind: 'prompt', text })
-        continue
-      }
-      if ((message.text ?? '').trim() !== '') this.entries.push({ kind: 'text', text: message.text })
-      for (const use of message.toolUses ?? []) {
-        this.entries.push({
-          kind: 'call',
-          id: use.tool_use_id,
-          tool: use.tool,
-          input: use.input ?? {},
-          isAnswered: use.result !== undefined || use.text !== undefined || use.isError === true,
-          isError: use.isError === true,
-          text: use.text ?? '',
-          result: use.result,
-        })
-      }
-    }
+    this.entries.forEach((entry, at) => {
+      if (entry.kind === 'prompt') this.prompts.push(at)
+    })
   }
 
-  /** Reads what the file gained; true when the conversation changed. */
+  /** The entries shown: those the file (or the snapshot) holds, then what the live file has that they lack. */
+  get shown() {
+    return this.live.length === 0 ? this.entries : [...this.entries, ...this.live]
+  }
+
+  /** Reads what the file and the live file gained; true when the conversation shown changed. */
   poll() {
+    const isChanged = this.pollFile()
+    return this.pollLive(isChanged) || isChanged
+  }
+
+  /**
+   * Takes up the live file: the session's newest turn as it holds it, from
+   * its prompt, written by the opener while a dialog waits. What of it the
+   * transcript lacks is shown after the transcript's own; once it lacks
+   * nothing, the file is removed.
+   */
+  pollLive(isFileChanged) {
+    if (this.liveFile === undefined) return false
+    let mtime
+    try {
+      mtime = fs.statSync(this.liveFile).mtimeMs
+    } catch {}
+    if (mtime !== this.liveMtime) {
+      this.liveMtime = mtime
+      this.liveTurn = undefined
+      try {
+        if (mtime !== undefined) this.liveTurn = sessionEntries(JSON.parse(fs.readFileSync(this.liveFile, 'utf8')))
+      } catch {}
+    } else if (!isFileChanged) return false
+    const was = this.live
+    this.live = this.missing(this.liveTurn ?? [])
+    if (this.liveTurn !== undefined && this.live.length === 0) {
+      // The transcript has caught up: the conversation is not left lying in a file.
+      try {
+        if (fs.statSync(this.liveFile).mtimeMs === mtime) fs.rmSync(this.liveFile, { force: true })
+      } catch {}
+      this.liveTurn = undefined
+    }
+    return was.length > 0 || this.live.length > 0
+  }
+
+  /** The entries of `turn` (a prompt first) past the last one the transcript's newest turn holds; none for another turn. */
+  missing(turn) {
+    const from = this.prompts.at(-1)
+    if (turn[0]?.kind !== 'prompt' || from === undefined || this.entries[from].text !== turn[0].text) return []
+    const held = this.entries.slice(from + 1)
+    const ids = new Set(held.flatMap(entry => (entry.kind === 'call' ? [entry.id] : [])))
+    const texts = new Set(held.flatMap(entry => (entry.kind === 'text' ? [entry.text.trim()] : [])))
+    const rest = turn.slice(1)
+    const last = rest.findLastIndex(entry => (entry.kind === 'call' ? ids.has(entry.id) : texts.has(entry.text.trim())))
+    return rest.slice(last + 1)
+  }
+
+  pollFile() {
     if (this.seeded === undefined) return this.read()
     // The file's rows are taken on their own; they stand once they hold a prompt.
     let size = -1
@@ -890,9 +939,57 @@ class Transcript {
   }
 }
 
+/** A conversation as the session holds it (SessionMessage[]) as entries: no times, no thinking. */
+function sessionEntries(messages) {
+  const entries = []
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (message.role === 'user') {
+      const text = (message.toolResults?.length ?? 0) > 0 ? '' : promptText(message.text ?? '')
+      if (text !== '') entries.push({ kind: 'prompt', text })
+      continue
+    }
+    if ((message.text ?? '').trim() !== '') entries.push({ kind: 'text', text: message.text })
+    for (const use of message.toolUses ?? []) {
+      entries.push({
+        kind: 'call',
+        id: use.tool_use_id,
+        tool: use.tool,
+        input: use.input ?? {},
+        isAnswered: use.result !== undefined || use.text !== undefined || use.isError === true,
+        isError: use.isError === true,
+        text: use.text ?? '',
+        result: use.result,
+      })
+    }
+  }
+  return entries
+}
+
+/** The Claude config directory: `CLAUDE_CONFIG_DIR`, else ~/.claude. */
+const configDir = () => process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude')
+
+/** Where the views a person last chose are kept, for every session (the plugin's own pane reads it too). */
+const STATE_FILE = () => path.join(configDir(), 'ccpopout-state.json')
+
+/** The views last chosen: `{ isClean?, isThinkingHidden? }`, `{}` where none was. */
+function readState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'))
+    return state !== null && typeof state === 'object' ? state : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeState(patch) {
+  try {
+    fs.writeFileSync(STATE_FILE(), `${JSON.stringify({ ...readState(), ...patch })}\n`)
+  } catch {}
+}
+
 function transcriptResolver(args) {
   if (args.file !== undefined) return () => args.file
-  const base = path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), 'projects')
+  const base = path.join(configDir(), 'projects')
   const name = `${args.session}.jsonl`
   return () => {
     if (args.cwd !== undefined) {
@@ -936,6 +1033,7 @@ const HELP = [
     ['c', 'copy the item (a call: its command or diff, and output)'],
     ['click', 'pick the item; on its first row, open or fold it'],
     ['drag', 'select text: copied when the button is let go'],
+    ['double click', 'select the word, and copy it'],
   ]],
   ['Scrolling', [
     ['k   j', 'one row up, down'],
@@ -943,7 +1041,7 @@ const HELP = [
     ['J  d  PgDn  space', 'half a page down'],
     ['g  Home', 'top'],
     ['G  End', 'bottom, and follow new output'],
-    ['wheel', 'three rows'],
+    ['wheel', 'as k and j, a step for each the terminal sends'],
   ]],
   ['All at once', [
     ['a   A', 'open, fold everything: tool calls (errors too), replies, thinking'],
@@ -1007,6 +1105,12 @@ class View {
     /** Claude's thinking between its tool calls left out. */
     this.isThinkingHidden = false
     this.folds = new Map()
+    /** Where each turn shown before was left, by its place among the prompts: `show` returns there. */
+    this.places = new Map()
+    /** Called with the views to keep (clean, thinking hidden) when one changes. */
+    this.onViews = undefined
+    /** The last press let go in place: where and when, and how to undo what it did, for a second to make it a double click. */
+    this.lastClick = undefined
     /** The item under the cursor: its place among the turn's entries after the prompt. */
     this.cursor = 0
     /** A line in the rule for a moment (what `c` copied), and when it goes. */
@@ -1043,19 +1147,14 @@ class View {
     return Math.max(1, (this.out.rows ?? 24) - this.headerRows)
   }
 
-  /** A blank row between the keys and the message, where there is height. */
-  get gapRows() {
-    return (this.out.rows ?? 24) < ROOMY_ROWS ? 0 : 1
-  }
-
-  /** The keys row, the gap, the message's rows, the rule. */
+  /** The keys row, the message's rows, the rule. */
   get headerRows() {
-    return this.titleRows().length + this.gapRows + 2
+    return this.titleRows().length + 2
   }
 
   /** The message as the header shows it: its first rows, marked when cut. */
   titleRows() {
-    const width = this.columns - 2
+    const width = this.columns - 2 - stampRoom(this.titleStamp())
     if (this.isHelp) return [`${`ccpopout ${VERSION}`.trimEnd()} · Keys · any key returns`]
     const prompt = this.entries()[0]
     if (prompt === undefined) {
@@ -1076,6 +1175,18 @@ class View {
     return rows
   }
 
+  /**
+   * When the message shown was sent, for the header's right edge: its day too
+   * when that is not today; '' for none, or where the header is too narrow.
+   */
+  titleStamp() {
+    const time = this.isHelp ? undefined : this.entries()[0]?.time
+    const stamp = stampText(time)
+    if (stamp === '') return ''
+    const text = dayOf(time) === dayOf(Date.now()) ? stamp : `${dayText(time)} ${stamp}`
+    return this.columns - 2 - stampRoom(text) < 24 ? '' : text
+  }
+
   get count() {
     return this.transcript.prompts.length
   }
@@ -1087,6 +1198,7 @@ class View {
     this.transcript.isBranched = false
     if (isBranched) {
       for (const id of this.folds.keys()) if (id.startsWith('text:')) this.folds.delete(id)
+      this.places.clear()
       this.rows = undefined
     }
     if (this.isNewest || isBranched) {
@@ -1100,10 +1212,19 @@ class View {
     if (isOnLast) this.cursor = lastItem(this.build()) ?? this.cursor
   }
 
+  /**
+   * Shows the turn `turn`: where it was left, when it was shown before, the
+   * cursor's item on the row of the screen it was on; else from its top.
+   */
   show(turn) {
     const to = Math.max(0, Math.min(this.count - 1, turn))
     this.isNewest = to >= this.count - 1
     if (to === this.turn && this.rows !== undefined) return
+    if (this.rows !== undefined && !this.isHelp && !this.isExpanded) {
+      const scroll = Math.min(this.scroll, this.maxScroll)
+      const first = this.rows.findIndex(line => line.item === this.cursor)
+      this.places.set(this.turn, { scroll, cursor: this.cursor, offset: first === -1 ? undefined : first - scroll, isFollowing: this.isFollowing })
+    }
     this.turn = to
     this.isExpanded = false
     this.expandBack = undefined
@@ -1112,11 +1233,27 @@ class View {
     this.scroll = 0
     this.cursor = 0
     this.rows = undefined
+    const place = this.places.get(to)
+    if (place === undefined || this.isHelp) return
+    this.cursor = place.cursor
+    this.isFollowing = place.isFollowing
+    this.scroll = place.scroll
+    // The rows may be others now (the clean view, a new width): the cursor's item keeps its row of the screen.
+    const rows = this.build()
+    const items = this.items()
+    if (!items.includes(this.cursor)) this.cursor = items.find(item => item > this.cursor) ?? items.at(-1) ?? 0
+    const first = rows.findIndex(line => line.item === this.cursor)
+    if (first !== -1 && place.offset !== undefined) this.scroll = Math.max(0, Math.min(this.maxScroll, first - place.offset))
+  }
+
+  /** The items the turn's rows show, in order. */
+  items() {
+    return [...new Set(this.build().flatMap(line => (line.item === undefined ? [] : [line.item])))]
   }
 
   /** The entries of the turn shown: its prompt first. */
   entries() {
-    const { prompts, entries } = this.transcript
+    const { prompts, shown: entries } = this.transcript
     if (prompts.length === 0) return []
     return entries.slice(prompts[this.turn], prompts[this.turn + 1] ?? entries.length)
   }
@@ -1142,8 +1279,14 @@ class View {
     const full = width
     width -= GUTTER + BAR
     if (prompt !== undefined && this.isExpanded) {
-      for (const line of clean(prompt.text).split('\n')) rows.push(...wrapSegs([{ t: line, s: S.bold }], width))
-      rows.push(row('─'.repeat(width), S.gray))
+      // The whole message on the header's ground, set apart from the turn; a press on it folds it again.
+      const pad = [{ t: ' ', s: '', skip: true }]
+      rows.push({ segs: [], bg: S.headerBg, isPrompt: true })
+      for (const line of clean(prompt.text).split('\n')) {
+        for (const wrapped of wrapSegs([{ t: line, s: S.bold }], width - 2, { first: pad, hang: pad })) rows.push({ ...wrapped, bg: S.headerBg, isPrompt: true })
+      }
+      rows.push({ segs: [], bg: S.headerBg, isPrompt: true })
+      rows.push(row())
     }
     // The clean view leaves Claude's words alone: each run of tool calls
     // between them is one row saying how many there were.
@@ -1227,9 +1370,14 @@ class View {
     return rows
   }
 
-  /** The blank rows past the turn's last: half a window, so the last item comes to the middle too. */
+  /** The row of the window being read, from 0: a little above its middle, where the eye rests. */
+  get readRow() {
+    return Math.max(0, ((this.windowRows - 1) >> 1) - READ_LIFT)
+  }
+
+  /** The blank rows past the turn's last, so the last item comes to the row being read too. */
   get tailRows() {
-    return this.isHelp ? 0 : this.windowRows >> 1
+    return this.isHelp ? 0 : this.windowRows - 1 - this.readRow
   }
 
   /** The window's place with the turn's last row at its foot: where following holds it. */
@@ -1241,7 +1389,7 @@ class View {
     return Math.max(0, this.build().length + this.tailRows - this.windowRows)
   }
 
-  /** Moves the window `by` rows, the cursor to the item at its middle row. */
+  /** Moves the window `by` rows, the cursor to the item at the row being read. */
   scrollBy(by) {
     this.back = undefined
     const max = this.maxScroll
@@ -1253,10 +1401,30 @@ class View {
     this.cursor = this.middleItem() ?? this.cursor
   }
 
-  /** The item at the middle row of the window, or the one nearest it (the one above, of two as near). */
+  /**
+   * `j` and `k`, and the wheel. With the window at the turn's top, `j` takes
+   * the cursor to the next item until it has come to the row being read, and
+   * `k` to the one before (the window cannot move up); elsewhere they scroll a
+   * row, the cursor to the item at the row being read.
+   */
+  rowKey(step) {
+    if (!this.isHelp && !this.isFollowing && Math.min(this.scroll, this.maxScroll) === 0) {
+      const items = this.items()
+      const at = items.indexOf(this.cursor)
+      const first = this.build().findIndex(line => line.item === this.cursor)
+      const isShort = step > 0 ? first !== -1 && first < this.readRow && at < items.length - 1 : at > 0
+      if (isShort) {
+        this.back = undefined
+        return this.move(step)
+      }
+    }
+    this.scrollBy(step)
+  }
+
+  /** The item at the row being read, or the one nearest it (the one above, of two as near). */
   middleItem() {
     const rows = this.build()
-    const middle = this.scroll + ((this.windowRows - 1) >> 1)
+    const middle = this.scroll + this.readRow
     for (let away = 0; away <= Math.max(middle, rows.length); away++) {
       const item = rows[middle - away]?.item ?? rows[middle + away]?.item
       if (item !== undefined) return item
@@ -1292,10 +1460,10 @@ class View {
     this.isFollowing = false
   }
 
-  /** The window's place with the first row of the item under the cursor at its middle. */
+  /** The window's place with the first row of the item under the cursor at the row being read. */
   reach() {
     const first = this.build().findIndex(line => line.item === this.cursor)
-    return Math.max(0, Math.min(this.maxScroll, first - ((this.windowRows - 1) >> 1)))
+    return Math.max(0, Math.min(this.maxScroll, first - this.readRow))
   }
 
   /** Moves the window to `to`, as the cursor's keys do: following ends where it moves. */
@@ -1316,7 +1484,7 @@ class View {
     this.rows = undefined
     if (this.isHelp) return
     const rows = this.build()
-    const items = [...new Set(rows.flatMap(line => (line.item === undefined ? [] : [line.item])))]
+    const items = this.items()
     if (!items.includes(this.cursor)) this.cursor = items.find(item => item > this.cursor) ?? items.at(-1) ?? 0
     const first = rows.findIndex(line => line.item === this.cursor)
     if (before === -1 || first === -1) return this.reveal()
@@ -1335,6 +1503,8 @@ class View {
     const flip = () => {
       if (key === 'z') this.isClean = !this.isClean
       else this.isThinkingHidden = !this.isThinkingHidden
+      // Kept for the next run, and every session's.
+      this.onViews?.({ isClean: this.isClean, isThinkingHidden: this.isThinkingHidden })
     }
     if (back?.key === key) {
       flip()
@@ -1352,7 +1522,7 @@ class View {
   /** Moves the cursor an item up or down, the item's first row to the middle of the window. */
   move(step) {
     const rows = this.build()
-    const items = [...new Set(rows.filter(line => line.item !== undefined).map(line => line.item))]
+    const items = this.items()
     if (items.length === 0) return
     const scroll = Math.min(this.scroll, this.maxScroll)
     const shown = rows.slice(scroll, scroll + this.windowRows)
@@ -1457,9 +1627,9 @@ class View {
         return
       }
       case 'k':
-        return this.scrollBy(-1)
+        return this.rowKey(-1)
       case 'j':
-        return this.scrollBy(1)
+        return this.rowKey(1)
       case 'u':
       case 'K':
       case 'pageup':
@@ -1555,7 +1725,7 @@ class View {
     this.selection = undefined
     this.pressed = undefined
     if (y === 1) return this.click(x, y)
-    this.pressed = { x, y }
+    this.pressed = { x, y, at: Date.now() }
   }
 
   /** The mouse moved, the button held or not; true when the selection changed. */
@@ -1567,31 +1737,83 @@ class View {
     return true
   }
 
-  /** The button was let go: a drag is copied, a press in place is a click. */
+  /**
+   * The button was let go: a drag is copied, a press in place is a click, and
+   * a second click soon after in the same cell of the turn selects the word
+   * there (and copies it), what the first did undone.
+   */
   release() {
-    const { pressed } = this
+    const { pressed, lastClick } = this
     this.pressed = undefined
+    this.lastClick = undefined
     if (pressed === undefined) return
     const text = this.selectionText()
     if (text !== '') return this.copied(text)
     this.selection = undefined
-    this.click(pressed.x, pressed.y)
+    const isDouble =
+      lastClick !== undefined && lastClick.x === pressed.x && lastClick.y === pressed.y && pressed.at - lastClick.at <= DOUBLE_CLICK_MS
+    if (isDouble && pressed.y > this.headerRows && !this.isHelp) {
+      if (lastClick.undo !== undefined) {
+        // The rows the word is read off are those before the first click.
+        lastClick.undo()
+        this.draw()
+      }
+      return this.selectWord(pressed.x, pressed.y)
+    }
+    const undo = this.click(pressed.x, pressed.y)
+    this.lastClick = { x: pressed.x, y: pressed.y, at: pressed.at, undo }
   }
 
+  /** Selects the word in cell `x` of screen row `y` as last drawn, and copies it. */
+  selectWord(x, y) {
+    const row = this.plain[y - 1]
+    if (row === undefined || row.isLayout) return
+    // The row's cells, each with the character in it: a wide one in its first.
+    const cells = []
+    for (const ch of row.text) {
+      cells.push(ch)
+      for (let more = charWidth(ch); more > 1; more--) cells.push('')
+    }
+    const isSkipped = col => row.skips.some(([first, end]) => col >= first && col < end)
+    const isWord = col => col >= 0 && col < cells.length && !isSkipped(col) && (cells[col] === '' || /[^\s()[\]{}<>"'`,;|│]/u.test(cells[col]))
+    let first = x - 1
+    if (!isWord(first)) return
+    let last = first
+    while (isWord(first - 1)) first--
+    while (isWord(last + 1)) last++
+    // A word ends before what closes a sentence.
+    while (last > first && /[.:!?]/.test(cells[last])) last--
+    this.selection = { from: { x: first + 1, y }, to: { x: last + 1, y } }
+    const text = this.selectionText()
+    if (text !== '') this.copied(text)
+  }
+
+  /** A press let go in place; returns how to undo what it did (opened or folded a call), if anything. */
   click(x, y) {
     if (y === 1) {
       const hit = this.hits.find(found => x >= found.from && x < found.to)
       if (hit !== undefined) this.key(hit.key)
-      return
+      return undefined
     }
     if (this.isHelp) return this.help(false)
     if (y < this.headerRows) return this.key('e')
-    if (y === this.headerRows) return
+    if (y === this.headerRows) return undefined
     this.back = undefined
     const line = this.build()[this.scroll + y - this.headerRows - 1]
-    if (line?.item === undefined) return
+    if (line?.isPrompt === true) return this.key('e')
+    if (line?.item === undefined) return undefined
+    const was = { cursor: this.cursor, scroll: this.scroll, isFollowing: this.isFollowing }
     this.cursor = line.item
-    if (line.call !== undefined) this.fold(undefined)
+    if (line.call === undefined) return undefined
+    const { id, isUnfolded } = line.call
+    this.fold(undefined)
+    return () => {
+      this.folds.set(id, isUnfolded)
+      this.rows = undefined
+      this.cursor = was.cursor
+      this.scroll = was.scroll
+      this.isFollowing = was.isFollowing
+    }
   }
 
   draw() {
@@ -1633,12 +1855,13 @@ class View {
 
     // The message is a press target too (it shows whole, or its start again).
     const titleBg = this.over() === 'title' ? S.hoverBg : S.headerBg
-    if (this.gapRows === 1) frame.push(`${ESC}[${titleBg}m${ESC}[K${RESET}`)
 
-    // Then which message, and how it starts.
-    for (const title of this.titleRows()) {
-      frame.push(`${ESC}[${sgr(titleBg, S.bold)}m ${truncate(title, width - 2)}${ESC}[K${RESET}`)
-    }
+    // Then which message, and how it starts; when it was sent at the first row's end.
+    const titleStamp = this.titleStamp()
+    this.titleRows().forEach((title, at) => {
+      const stamp = at === 0 && titleStamp !== '' ? `${ESC}[${width - titleStamp.length}G${ESC}[${sgr(titleBg, S.stamp)}m${titleStamp}` : ''
+      frame.push(`${ESC}[${sgr(titleBg, S.bold)}m ${truncate(title, width - 2 - stampRoom(titleStamp))}${ESC}[K${RESET}${stamp}${RESET}`)
+    })
 
     // The rule, with where the window is: in the tool color, to be read among the dashes.
     // How many rows there are above and below the window, or that it is at an end.
@@ -1652,20 +1875,28 @@ class View {
     const bar = at =>
       isWhole ? '' : `${ESC}[${width}G${RESET}${at >= thumbAt && at < thumbAt + thumb ? `${ESC}[${S.cyan}m┃` : `${ESC}[${sgr(S.gray, S.dim)}m│`}${RESET}`
     const live = this.notice !== '' ? this.notice : this.isFollowing ? ' following ' : ''
+    // Which of the items the turn shows (hidden ones not counted) the cursor is on, of how many.
+    const items = this.isHelp ? [] : this.items()
+    let blocks = items.length === 0 ? '' : ` ▌ ${items.indexOf(this.cursor) + 1}/${items.length} `
+    if (textWidth(blocks) + range.length + live.length + 2 > width) blocks = ''
     // And the day the window's top row was written on, when that is not today.
     const top = this.isHelp ? undefined : (shown.find(line => line.time !== undefined) ?? rows.slice(0, this.scroll).findLast(line => line.time !== undefined))
     const topTime = this.isHelp ? undefined : (top?.time ?? this.entries()[0]?.time)
     let day = dayOf(topTime) === undefined || dayOf(topTime) === dayOf(Date.now()) ? '' : ` ${dayText(topTime)} `
-    if (textWidth(day) + 2 + range.length + live.length + 2 > width) day = ''
+    if (textWidth(day) + 2 + textWidth(blocks) + range.length + live.length + 2 > width) day = ''
     const lead = day === '' ? '' : `──${ESC}[${S.tool}m${day}${ESC}[${S.gray}m`
-    const rule = '─'.repeat(Math.max(0, width - (day === '' ? 0 : textWidth(day) + 2) - range.length - live.length - 2))
-    frame.push(`${ESC}[${S.gray}m${lead}${rule}${ESC}[${S.tool}m${live}${range}${ESC}[${S.gray}m──${RESET}`)
+    const rule = '─'.repeat(Math.max(0, width - (day === '' ? 0 : textWidth(day) + 2) - textWidth(blocks) - range.length - live.length - 2))
+    frame.push(`${ESC}[${S.gray}m${lead}${rule}${ESC}[${S.tool}m${live}${ESC}[${S.cyan}m${blocks}${ESC}[${S.tool}m${range}${ESC}[${S.gray}m──${RESET}`)
 
     const bodyAt = frame.length
     for (let at = 0; at < this.windowRows; at++) {
       const line = shown[at]
       if (this.isHelp) frame.push(`${paint(line, width - BAR)}${bar(at)}`)
-      else frame.push(`${RESET}${line?.item === this.cursor ? `${ESC}[${S.cyan}m▌ ` : '  '}${paint(line, width - GUTTER - BAR)}${bar(at)}`)
+      else {
+        // The expanded message's ground runs under the gutter too.
+        const ground = line?.isPrompt === true ? `${ESC}[${line.bg}m` : ''
+        frame.push(`${RESET}${line?.item === this.cursor ? `${ESC}[${S.cyan}m▌ ` : `${ground}  `}${paint(line, width - GUTTER - BAR)}${bar(at)}`)
+      }
     }
 
     // A selection leaves out the cursor's cells and what else is the layout's.
@@ -1786,7 +2017,9 @@ function parseArgs(argv) {
   for (let at = 0; at < argv.length; at++) {
     if (argv[at] === '--session') args.session = argv[++at]
     else if (argv[at] === '--snapshot') args.snapshot = argv[++at]
+    else if (argv[at] === '--live') args.live = argv[++at]
     else if (argv[at] === '--clean') args.isClean = true
+    else if (argv[at] === '--full') args.isClean = false
     else if (argv[at] === '--cwd') args.cwd = argv[++at]
     else if (argv[at] === '--help' || argv[at] === '-h') args.isHelp = true
     else if (argv[at] === '--version') args.isVersion = true
@@ -1802,7 +2035,9 @@ function main() {
     process.exit(0)
   }
   if (args.isHelp || (args.file === undefined && args.session === undefined)) {
-    process.stderr.write('usage: popout.mjs <transcript.jsonl> | --session <id> [--cwd <dir>] [--snapshot <messages.json>] [--clean]\n')
+    process.stderr.write(
+      'usage: popout.mjs <transcript.jsonl> | --session <id> [--cwd <dir>] [--snapshot <messages.json>] [--live <messages.json>] [--clean|--full]\n',
+    )
     process.exit(args.isHelp ? 0 : 2)
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -1810,9 +2045,13 @@ function main() {
     process.exit(2)
   }
 
-  const transcript = new Transcript(transcriptResolver(args))
+  const transcript = new Transcript(transcriptResolver(args), args.live)
   const view = new View(transcript, process.stdout)
-  view.isClean = args.isClean === true
+  // The views last chosen; on a first run, the one asked for (clean when none was).
+  const state = readState()
+  view.isClean = typeof state.isClean === 'boolean' ? state.isClean : args.isClean !== false
+  view.isThinkingHidden = state.isThinkingHidden === true
+  view.onViews = writeState
   transcript.poll()
   if (args.snapshot !== undefined) {
     // Read once and removed: the conversation is not left lying in a file.
@@ -1828,6 +2067,8 @@ function main() {
   const close = code => {
     if (isClosed) return
     isClosed = true
+    // What the session had not written is not left lying in a file.
+    if (args.live !== undefined) fs.rmSync(args.live, { force: true })
     process.stdout.write(`${MOUSE_OFF}${RESET}${ESC}[?25h${ESC}[?1049l`)
     try {
       process.stdin.setRawMode(false)
@@ -1859,8 +2100,9 @@ function main() {
           // The rows move under a selection: it is let go.
           view.selection = undefined
           view.pressed = undefined
-          if (button === 64) view.scrollBy(-WHEEL_ROWS)
-          else if (button === 65) view.scrollBy(WHEEL_ROWS)
+          // As `k` and `j`: at the turn's top the cursor goes item by item first.
+          if (button === 64) view.rowKey(-WHEEL_ROWS)
+          else if (button === 65) view.rowKey(WHEEL_ROWS)
         }
       } else if (event.key === 'ctrl+c' || event.key === 'ctrl+d') {
         return close(0)

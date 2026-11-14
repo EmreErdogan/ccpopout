@@ -5,6 +5,24 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+### Both panes
+
+- They open in the clean view, tool calls hidden. A `clean` setting (`/config`, or `pluginConfigs` in settings.json) opens them in the full view instead.
+- The view chosen with `z` is kept, for every pane opened after, in every session; in the side pane so is whether the thinking is hidden (`t`).
+- Going to another message (`p`, `n`) and back, the turn is where it was left: the cursor on its item, the item on its row of the screen.
+- The row being read, where `↑` and `↓` bring an item, is two rows above the window's middle.
+- At the top of a turn `j` and the wheel down take the cursor item by item, the window still, until it has come to the row being read; `k` and the wheel up take it to the item before.
+- The header is shorter: no blank row under the keys, and at most two rows of the message.
+- The whole message (`e`) shows on the header's ground, set apart from the turn. In the side pane a press on it folds it again.
+- The rule under the header counts the items the turn shows, and says which one the cursor is on: `▌ 3/12`.
+- What Claude wrote before a question it asks (AskUserQuestion), or before a call waiting for a permission, shows while the dialog is open, not only once it is answered.
+
+### Side pane
+
+- The wheel scrolls a row for each step the terminal sends, about three to a notch, not three rows for each.
+- A double click selects the word under the mouse, and copies it.
+- The header's message ends with the time it was sent.
+
 ## v0.6.0 — 2026-10-22
 
 ### Side pane

@@ -173,9 +173,12 @@ test('the pane folds and opens every call, or one kind, and shows its keys', asy
     expect(await ui.find({ text: /Done editing/ })).toBeUndefined()
     await ui.press({ key: 'help' })
     expect(await ui.find({ text: /Done editing/ })).toBeDefined()
-    // Back to how a turn starts, for the next surface.
+    // Back to how a turn starts, for the next surface: the error open, the cursor on the first item.
     await ui.press({ key: 'foldAll' })
     await ui.press({ key: 'call:b2' })
+    for (let at = 0; at < 5; at++) {
+      await $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 0, by: -1, bodyRows: 30, contentRows: 60, origin: { kind: 'person' } } as never)
+    }
     await ui.unmount()
   }
 })
@@ -304,7 +307,7 @@ test('the pane moves a cursor over the items, opens the one it is on and copies 
   await ui.unmount()
 })
 
-test('in the fullscreen layout the cursor\'s item is held at the middle of the window', async ($, on) => {
+test('in the fullscreen layout the cursor\'s item is held at the row being read, a little above the middle', async ($, on) => {
   // A reply, a blank row, forty folded calls: 42 rows.
   const toolUses = Array.from({ length: 40 }, (_, at) => ({ tool_use_id: `c${at}`, tool: 'Bash', input: { command: `echo ${at}` }, text: `${at}` }))
   on('session.messages', () => ({
@@ -327,35 +330,76 @@ test('in the fullscreen layout the cursor\'s item is held at the middle of the w
     for (let at = 0; at < times; at++) await arrow(by)
   }
 
-  // Thirty rows: four of header, twenty-six of body, so twelve rows above the middle one.
+  // Thirty rows: three of header, twenty-seven of body; the row read has eleven above it, two short of the middle.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // Near the top there is nothing above to scroll to: the window stays.
-  await arrows(1, 11)
-  expect(await ui.find({ text: /top · ↓ 16/ })).toBeDefined()
-  // From there on each item comes to the middle row.
+  await arrows(1, 10)
+  expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
+  // From there on each item comes to the row read.
   await arrows(1, 9)
-  expect(await ui.find({ text: /↑ 9 · ↓ 7/ })).toBeDefined()
+  expect(await ui.find({ text: /↑ 9 · ↓ 6/ })).toBeDefined()
   // The last one too, over the blank rows past the turn's end.
-  await arrows(1, 20)
-  expect(await ui.find({ text: /↑ 29 · end/ })).toBeDefined()
+  await arrows(1, 21)
+  expect(await ui.find({ text: /↑ 30 · end/ })).toBeDefined()
   expect(await ui.find({ text: /echo 39/ })).toBeDefined()
-  expect(await ui.find({ text: /echo 26/ })).toBeUndefined()
+  expect(await ui.find({ text: /echo 27/ })).toBeUndefined()
   // The window goes no further than that.
   await presses(ui, 'pageDown', 3)
-  expect(await ui.find({ text: /↑ 29 · end/ })).toBeDefined()
+  expect(await ui.find({ text: /↑ 30 · end/ })).toBeDefined()
   await arrows(-1, 40)
-  expect(await ui.find({ text: /top · ↓ 16/ })).toBeDefined()
+  expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
 
-  // Scrolled, the cursor is on the item at the window's middle row: half a page down, that is row 13 + 12, the call `echo 23`.
+  // Scrolled a page, the cursor is on the item at the row read: half a page down, that is row 13 + 11, the call `echo 22`.
   await ui.press({ key: 'pageDown' })
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 23\n23')
-  await ui.press({ key: 'down' })
+  expect(copied.at(-1)).toBe('$ echo 22\n22')
+  await arrow(1)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 24\n24')
+  expect(copied.at(-1)).toBe('$ echo 23\n23')
   await presses(ui, 'pageUp', 2)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 10\n10')
+  expect(copied.at(-1)).toBe('$ echo 9\n9')
+  await arrows(-1, 40)
+
+  // At the turn's top, `j` takes the cursor item by item, the window still,
+  // until it has come to the row read: the call `echo 9`, at row 11.
+  for (let at = 0; at < 10; at++) {
+    await ui.press({ key: 'down' })
+    await ui.press({ key: 'copy' })
+    expect(copied.at(-1)).toBe(`$ echo ${at}\n${at}`)
+  }
+  expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
+  // From there it scrolls, the cursor at the row read: row 3 + 11, the call `echo 12`.
+  await presses(ui, 'down', 3)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 12\n12')
+  expect(await ui.find({ text: /↑ 3 · ↓ 12/ })).toBeDefined()
+  // Back at the top, `k` takes it to the item before.
+  await presses(ui, 'up', 3)
+  await ui.press({ key: 'up' })
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 8\n8')
+
+  // The wheel does as `j` and `k`: at the top, item by item, the window still.
+  const wheel = (by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' }, pointer: { column: 10, row: 10 } } as never)
+  await wheel(1)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 9\n9')
+  await wheel(-1)
+  await wheel(-1)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 7\n7')
+  expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
+  // Past the top it takes the cursor to the item at the row read, both ways: row 13 + 11, then 11 + 11.
+  await arrows(1, 12)
+  for (let at = 0; at < 3; at++) await wheel(1)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 22\n22')
+  await wheel(-1)
+  await wheel(-1)
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 20\n20')
   await arrows(-1, 40)
   await ui.unmount()
 
@@ -389,7 +433,7 @@ test('an item that reaches past the window is come to at its first row, from abo
   const arrow = (by: number) =>
     $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' } } as never)
 
-  // Twenty-six rows of body: the middle one has twelve above it.
+  // Twenty-seven rows of body: the row read has eleven above it.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rule = async () => ((await ui.find({ text: /─── / }))?.text ?? '').match(/(top|↑ \d+) · (end|↓ \d+)/)?.[0]
   const places: (string | undefined)[] = []
@@ -397,8 +441,8 @@ test('an item that reaches past the window is come to at its first row, from abo
     await arrow(1)
     places.push(await rule())
   }
-  // The call, the long reply (its first row above the middle already), and the call after it (55 - 12).
-  expect(places).toEqual(['top · ↓ 30', 'top · ↓ 30', '↑ 43 · end'])
+  // The call, the long reply (its first row above the row read already), and the call after it (55 - 11).
+  expect(places).toEqual(['top · ↓ 29', 'top · ↓ 29', '↑ 44 · end'])
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe('$ echo 1\n1')
 
@@ -408,10 +452,71 @@ test('an item that reaches past the window is come to at its first row, from abo
     await arrow(-1)
     places.push(await rule())
   }
-  expect(places).toEqual(['top · ↓ 30', 'top · ↓ 30'])
+  expect(places).toEqual(['top · ↓ 29', 'top · ↓ 29'])
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe('$ echo 0\n0')
   await arrow(-1)
+  await ui.unmount()
+})
+
+test('a turn shown again is where it was left, and the rule counts the items shown', async ($, on) => {
+  const toolUses = Array.from({ length: 40 }, (_, at) => ({ tool_use_id: `c${at}`, tool: 'Bash', input: { command: `echo ${at}` }, text: `${at}` }))
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: 'a short turn', toolUses: [] },
+      { role: 'assistant', text: 'Short.', toolUses: [] },
+      { role: 'user', text: 'a long turn', toolUses: [] },
+      { role: 'assistant', text: 'Start.', toolUses },
+    ],
+  }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
+  const arrow = (by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' } } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ text: /▌ 1\/41 / })).toBeDefined()
+  for (let at = 0; at < 15; at++) await arrow(1)
+  // The call `echo 14`, its first row (16) at the row read (11).
+  expect(await ui.find({ text: /▌ 16\/41  ↑ 5 · ↓ 10/ })).toBeDefined()
+  await ui.press({ key: 'older' })
+  expect(await ui.find({ text: /1\/2 › a short turn/ })).toBeDefined()
+  expect(await ui.find({ text: /▌ 1\/1 / })).toBeDefined()
+  await ui.press({ key: 'newer' })
+  expect(await ui.find({ text: /▌ 16\/41  ↑ 5 · ↓ 10/ })).toBeDefined()
+
+  // The clean view counts what it shows: the reply alone.
+  await ui.press({ key: 'clean' })
+  expect(await ui.find({ text: /▌ 1\/1 / })).toBeDefined()
+  await ui.press({ key: 'clean' })
+  await ui.unmount()
+})
+
+test('the pane opens in the view the setting names, then in the one last chosen', { options: { clean: false } }, async ($, on) => {
+  on('session.messages', () => ({ value: CONVERSATION }))
+  const files = new Map<string, string>()
+  on('fs.read', (_$, e) => (files.has(e.path) ? { value: files.get(e.path) as string } : { value: '' }))
+  on('fs.write', (_$, e) => {
+    files.set(e.path, e.text)
+    return { value: undefined }
+  })
+  host(on, { HOME: '/home/u' }, () => '')
+  const STATE = '/home/u/.claude/ccpopout-state.json'
+
+  // Nothing chosen yet: the setting's full view.
+  await $.command.run(typed('popout'))
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'call:b1' })).toBeDefined()
+  await ui.press({ key: 'clean' })
+  expect(await ui.find({ key: 'call:b1' })).toBeUndefined()
+  expect(JSON.parse(files.get(STATE) ?? '{}')).toEqual({ isClean: true })
+  await ui.unmount()
+
+  // Chosen: the next pane opens in it, whatever the setting.
+  await $.command.run(typed('popout'))
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'call:b1' })).toBeUndefined()
+  expect(await ui.find({ text: /⋯ 3 tool calls/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -575,7 +680,7 @@ test('/popout side uses tmux where herdr is not running', async ($, on) => {
   await $.command.run(typed('popout', 'side'))
   const split = ran.find(argv => argv[1] === 'split-window') ?? []
   expect(split.slice(0, 9)).toEqual(['tmux', 'split-window', '-h', '-P', '-F', '#{pane_id}', '-c', "/work/it's here", '-t'])
-  expect(split.slice(-4)).toEqual(['--session', 'abc-123', '--cwd', "/work/it's here"])
+  expect(split.slice(-5)).toEqual(['--session', 'abc-123', '--cwd', "/work/it's here", '--clean'])
   expect(split.some(arg => arg.endsWith('/tui/popout.mjs'))).toBe(true)
 })
 

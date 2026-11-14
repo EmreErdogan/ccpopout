@@ -18,6 +18,12 @@
       "description": "Where /popout side and /popout-side open the side pane, beside Claude Code. The CCPOPOUT_SIDE environment variable, when set to left or right, overrides it.",
       "default": "right",
       "options": ["right", "left"]
+    },
+    "clean": {
+      "type": "boolean",
+      "title": "Open in the clean view",
+      "description": "Whether the panes open in the clean view (tool calls hidden) until a view is chosen with z. From then on they open in the view last chosen, in every session.",
+      "default": true
     }
   }
 }

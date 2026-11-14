@@ -27,7 +27,7 @@ const TOOL_COLOR = 'blue'
 /** Nav row, prompt row, rule: the rows above the scrolling window. */
 const HEADER_ROWS = 3
 /** Most rows of the message a docked pane's header shows; `e` shows it whole. */
-const TITLE_ROWS = 3
+const TITLE_ROWS = 2
 /** Below this many rows a pane's header keeps to one row of the message. */
 const ROOMY_ROWS = 16
 /** The turns program a multiplexer's pane runs, under the plugin's root. */
@@ -38,6 +38,18 @@ const WIDE_COLUMNS = 140
 type Side = 'right' | 'left'
 /** The side `/popout side` opens on: the plugin's `side` setting, read at load. */
 let settingSide: Side = 'right'
+/** Whether the panes open in the clean view where none was chosen yet: the plugin's `clean` setting. */
+let settingClean = true
+/** How many rows above the window's middle the row being read is: about where the eye rests. */
+const READ_LIFT = 2
+
+/** The row of a window `rows` tall being read, from 0: a little above its middle. */
+function readRowOf(rows: number): number {
+  return Math.max(0, ((rows - 1) >> 1) - READ_LIFT)
+}
+
+/** Where each turn shown before was left, by its prompt's place among the messages: going back returns there. */
+const places = new Map<number, { scroll: number; cursor: number; offset?: number }>()
 
 /**
  * The scroll bounds of the turn last drawn, for the handlers that move
@@ -181,6 +193,8 @@ type Line = {
   color?: string
   isDim?: boolean
   isBold?: boolean
+  /** A ground for the row to its edges: the header's, under the expanded message. */
+  bg?: string
   /**
    * On a tool call's row: its mark and the tool's name, drawn in the tool
    * color before `text` (the argument and summary), apart from Claude's prose.
@@ -381,8 +395,9 @@ async function settle($: EngineInterface): Promise<void> {
 
 /**
  * Moves the window `by` rows over the turn last drawn. In the fullscreen
- * layout the cursor comes to the item at the window's middle row, or the one
- * nearest it (the one above, of two as near). Elsewhere a cursor left out of
+ * layout the cursor comes to the item at the row being read (a little above
+ * the middle), or the one nearest it (the one above, of two as near).
+ * Elsewhere a cursor left out of
  * sight comes to the nearest item still in it: the top one going down, the
  * bottom one going up.
  */
@@ -393,7 +408,7 @@ async function scrollWindow($: EngineInterface, by: number): Promise<void> {
   await update($, scrollRows, () => to)
   if (isCentered) {
     if (to === from) return
-    const middle = to + ((windowRows - 1) >> 1)
+    const middle = to + readRowOf(windowRows)
     const away = (rows: { first: number; last: number }) => Math.max(rows.first - middle, middle - rows.last, 0)
     const near = itemRows.reduce<(typeof itemRows)[number] | undefined>((best, rows) => (best === undefined || away(rows) < away(best) ? rows : best), undefined)
     if (near !== undefined) await update($, cursorItem, () => near.item)
@@ -404,6 +419,21 @@ async function scrollWindow($: EngineInterface, by: number): Promise<void> {
   if (shown.some(rows => rows.item === cursor)) return
   const near = by > 0 ? shown[0] : shown.at(-1)
   if (near !== undefined) await update($, cursorItem, () => near.item)
+}
+
+/**
+ * `j` and `k`, and a wheel tick. In the fullscreen layout, with the window at
+ * the turn's top, `j` takes the cursor to the next item until it has come to
+ * the row being read, and `k` to the one before; elsewhere they scroll a row.
+ */
+async function scrollRow($: EngineInterface, step: number): Promise<void> {
+  if (isCentered && anchor === undefined && !(await read($, isHelpShown)) && Math.min(await read($, scrollRows), maxScroll) === 0) {
+    const cursor = await read($, cursorItem)
+    const at = itemRows.findIndex(rows => rows.item === cursor)
+    const isShort = step > 0 ? at !== -1 && (itemRows[at]?.first ?? 0) < readRowOf(windowRows) && at < itemRows.length - 1 : at > 0
+    if (isShort) return moveCursor($, step)
+  }
+  await scrollWindow($, step)
 }
 
 /** Keeps the open pane current as the conversation grows. */
@@ -475,8 +505,8 @@ async function flash($: EngineInterface, text: string): Promise<void> {
 
 /**
  * Moves the cursor an item up or down the turn last drawn, the window after
- * it. In the fullscreen layout the item's first row comes to the middle of
- * the window. Elsewhere the item comes whole into view, or its top where it is
+ * it. In the fullscreen layout the item's first row comes to the row being
+ * read, a little above the middle of the window. Elsewhere the item comes whole into view, or its top where it is
  * taller.
  */
 async function moveCursor($: EngineInterface, step: number): Promise<void> {
@@ -501,9 +531,61 @@ async function moveCursor($: EngineInterface, step: number): Promise<void> {
   const to = itemRows[at]
   if (to === undefined) return
   await update($, cursorItem, () => to.item)
-  if (isCentered) await update($, scrollRows, () => Math.max(0, Math.min(maxScroll, to.first - ((windowRows - 1) >> 1))))
+  if (isCentered) await update($, scrollRows, () => Math.max(0, Math.min(maxScroll, to.first - readRowOf(windowRows))))
   else if (to.first < scroll) await update($, scrollRows, () => to.first)
   else if (to.last >= scroll + windowRows) await update($, scrollRows, () => Math.min(maxScroll, Math.min(to.first, to.last - windowRows + 1)))
+}
+
+/** The Claude config directory: `CLAUDE_CONFIG_DIR`, else ~/.claude; undefined where neither is known. */
+async function configDir($: EngineInterface): Promise<string | undefined> {
+  try {
+    const home = await $.env.get('HOME')
+    return (await $.env.get('CLAUDE_CONFIG_DIR')) ?? (home === undefined ? undefined : `${home}/.claude`)
+  } catch {
+    return undefined
+  }
+}
+
+/** The views last chosen, kept for every session in a file the side pane shares: `{ isClean?, isThinkingHidden? }`. */
+async function readViews($: EngineInterface): Promise<Record<string, unknown>> {
+  const config = await configDir($)
+  if (config === undefined) return {}
+  try {
+    const state = JSON.parse(await $.fs.read(`${config}/ccpopout-state.json`))
+    return state !== null && typeof state === 'object' ? state : {}
+  } catch {
+    return {}
+  }
+}
+
+async function writeViews($: EngineInterface, patch: Record<string, unknown>): Promise<void> {
+  const config = await configDir($)
+  if (config === undefined) return
+  try {
+    await $.fs.write(`${config}/ccpopout-state.json`, `${JSON.stringify({ ...(await readViews($)), ...patch })}\n`)
+  } catch {}
+}
+
+/** The file the side pane reads what the session has not written yet from. */
+async function liveFile($: EngineInterface): Promise<string | undefined> {
+  const config = await configDir($)
+  return config === undefined ? undefined : `${config}/ccpopout-live-${await $.session.id()}.json`
+}
+
+/**
+ * While a dialog waits for the person the session writes nothing to its
+ * transcript: the side pane is handed the newest turn as the session holds
+ * it, from its prompt, to show what its transcript still lacks.
+ */
+async function writeLive($: EngineInterface): Promise<void> {
+  const file = await liveFile($)
+  if (file === undefined) return
+  const messages = await $.session.messages()
+  const from = messages.findLastIndex(message => promptText(message) !== '')
+  if (from === -1) return
+  try {
+    await $.fs.write(file, JSON.stringify(messages.slice(from)))
+  } catch {}
 }
 
 /** Lets go of what was kept of a turn's place: another turn is shown. */
@@ -517,6 +599,10 @@ function forgetPlace(): void {
 /** Opens the pane inside Claude Code, at its newest turn. */
 async function openInnerPane($: EngineInterface): Promise<void> {
   forgetPlace()
+  places.clear()
+  // The view last chosen, in any session; the setting's where none was.
+  const views = await readViews($)
+  await update($, isClean, () => (typeof views.isClean === 'boolean' ? views.isClean : settingClean))
   await update($, turnIndex, () => 0)
   await update($, isPromptExpanded, () => false)
   await update($, scrollRows, () => 0)
@@ -602,12 +688,14 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   const cwd = await $.session.cwd()
   const session = await $.session.id()
   const program = [node, `${$.plugin.root}/${TUI}`, '--session', session, '--cwd', cwd]
-  if (await read($, isClean)) program.push('--clean')
+  // The view it starts in where none was chosen yet; it reads the one last chosen itself.
+  program.push(settingClean ? '--clean' : '--full')
+  const live = await liveFile($)
+  if (live !== undefined) program.push('--live', live)
   // A session just resumed holds its history in memory, its file empty until
   // the next message: the program starts from this snapshot, and removes it.
   try {
-    const home = await $.env.get('HOME')
-    const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? (home === undefined ? undefined : `${home}/.claude`)
+    const config = await configDir($)
     if (config !== undefined) {
       const snapshot = `${config}/ccpopout-snapshot-${session}.json`
       await $.fs.write(snapshot, JSON.stringify(await $.session.messages()))
@@ -674,6 +762,7 @@ async function showSidePane($: EngineInterface, asked?: Side): Promise<void> {
 
 export const register: Register = (on, options) => {
   if (options.side === 'left' || options.side === 'right') settingSide = options.side
+  if (typeof options.clean === 'boolean') settingClean = options.clean
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -741,6 +830,8 @@ export const register: Register = (on, options) => {
     const isArrow = e.origin.kind === 'person' && e.pointer === undefined && Math.abs(e.by) === 1
     if (isPinning) return next({ ...e, offset: PIN })
     if (isArrow && !(await read($, isHelpShown))) await moveCursor($, e.by)
+    // A wheel tick at rest is a row, as `j` and `k`: at the turn's top the cursor goes item by item first.
+    else if (e.pointer !== undefined && Math.abs(e.by) === 1) await scrollRow($, e.by)
     else await scrollWindow($, e.by)
     return next({ ...e, offset: PIN })
   })
@@ -751,10 +842,22 @@ export const register: Register = (on, options) => {
     return done
   })
 
+  // A call shows in the pane as it starts (one waiting on the person may wait long), and again when answered.
   on('tool.call', async ($, e, next) => {
+    await refresh($)
     const ran = await next(e)
     await refresh($)
     return ran
+  })
+
+  // A call put to the person: until it is answered the session writes nothing
+  // of its turn to the transcript, so the side pane is handed it.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+    if (verdict.decision === 'ask' && e.tool_use_id !== undefined && e.agentId === undefined && (await read($, sidePane)) !== null) {
+      await writeLive($)
+    }
+    return verdict
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -801,8 +904,11 @@ export const register: Register = (on, options) => {
     /** The turn's items in order: a reply's text, or a tool call. */
     const items: (string | ToolUseSummary)[] = []
     if (isExpanded) {
-      for (const row of prompt.split('\n').flatMap(line => wrapWords(line, inner))) lines.push({ text: row, isBold: true })
-      lines.push({ text: '─'.repeat(inner), isDim: true })
+      // The whole message on the header's ground, set apart from the turn.
+      lines.push({ text: '', bg: HEADER_BG })
+      for (const row of prompt.split('\n').flatMap(line => wrapWords(line, inner - 2))) lines.push({ text: ` ${row}`, isBold: true, bg: HEADER_BG })
+      lines.push({ text: '', bg: HEADER_BG })
+      lines.push({ text: '' })
     }
     // The clean view leaves Claude's words alone: each run of tool calls
     // between them is one row saying how many there were.
@@ -891,13 +997,10 @@ export const register: Register = (on, options) => {
     }
     if (isHelp) titles = [`${`ccpopout ${await pluginVersion($)}`.trimEnd()} · Keys · h, q or esc returns`]
 
-    // A blank row between the keys and the message, where there is height.
-    const gapRows = e.props.placement === 'dock' && screenRows >= ROOMY_ROWS ? 1 : 0
-
-    windowRows = screenRows - (HEADER_ROWS - 1 + gapRows + titles.length)
+    windowRows = screenRows - (HEADER_ROWS - 1 + titles.length)
     isCentered = e.props.placement === 'dock'
-    // Half a window of blank rows past the turn's last: the last item comes to the middle too.
-    const tailRows = isCentered && !isHelp ? windowRows >> 1 : 0
+    // Blank rows past the turn's last: the last item comes to the row being read too.
+    const tailRows = isCentered && !isHelp ? windowRows - 1 - readRowOf(windowRows) : 0
     maxScroll = Math.max(0, lines.length + tailRows - windowRows)
     let scrolled = Math.min(await read($, scrollRows), maxScroll)
     if (!isHelp && anchor?.start === start && cursorRows !== undefined) {
@@ -924,15 +1027,25 @@ export const register: Register = (on, options) => {
       await change()
       return anchor !== undefined
     }
+    // Another turn is shown where it was left, when it was shown before: the
+    // cursor's item on the row of the screen it was on. Else from its top.
     const go = (to: number) => async () => {
+      const index = Math.max(0, Math.min(prompts.length - 1, to))
+      const toStart = prompts[prompts.length - 1 - index] ?? 0
+      if (!isHelp && !isExpanded && toStart !== start) {
+        places.set(start, { scroll: scrolled, cursor, offset: cursorRows === undefined ? undefined : cursorRows.first - scrolled })
+      }
       forgetPlace()
-      await update($, turnIndex, () => Math.max(0, Math.min(prompts.length - 1, to)))
+      const place = toStart === start ? undefined : places.get(toStart)
+      if (place?.offset !== undefined) anchor = { start: toStart, offset: place.offset }
+      await update($, turnIndex, () => index)
       await update($, isPromptExpanded, () => false)
-      await update($, scrollRows, () => 0)
-      await update($, cursorItem, () => 0)
+      await update($, scrollRows, () => place?.scroll ?? 0)
+      await update($, cursorItem, () => place?.cursor ?? 0)
       await update($, isHelpShown, () => false)
     }
     const scroll = (by: number) => () => scrollWindow($, by)
+    const rowKey = (step: number) => () => scrollRow($, step)
     // One lowercase key each, so a key toggles: fold while any is open, else open.
     const foldAll = (kind?: CallKind) => async () => {
       const group = calls.filter(call => kind === undefined || call.kind === kind)
@@ -954,6 +1067,9 @@ export const register: Register = (on, options) => {
     // A turn the window holds whole shows neither: the blank rows past its end are all there is to scroll to.
     const isWhole = lines.length <= windowRows
     const range = isWhole ? '' : ` ${scrolled === 0 ? 'top' : `↑ ${scrolled}`} · ${below <= 0 ? 'end' : `↓ ${below}`} `
+    // Which of the items the turn shows (hidden ones not counted) the cursor is on, of how many.
+    const cursorAt = itemRows.findIndex(rows => rows.item === cursor)
+    const blocks = isHelp || itemRows.length === 0 ? '' : ` ▌ ${cursorAt === -1 ? '·' : cursorAt + 1}/${itemRows.length} `
     // The scroll bar: the window's share of the rows, at its place among them.
     const thumb = Math.max(1, Math.round((windowRows * windowRows) / Math.max(1, lines.length + tailRows)))
     const thumbAt = maxScroll === 0 ? 0 : Math.round((scrolled / maxScroll) * (windowRows - thumb))
@@ -1032,6 +1148,7 @@ export const register: Register = (on, options) => {
               // Nothing moved since: the turn is back where it was.
               anchor = undefined
               await update($, isClean, was => !was)
+              await writeViews($, { isClean: !isCleanView })
               await update($, cursorItem, () => back.cursor)
               await update($, scrollRows, () => back.scroll)
               return
@@ -1045,6 +1162,8 @@ export const register: Register = (on, options) => {
               }
               await update($, isClean, was => !was)
             })
+            // Kept for the next pane, and every session's.
+            await writeViews($, { isClean: !isCleanView })
             if (!isKept) cleanBack = undefined
           }}>
             {isCleanView ? 'full' : 'clean'}
@@ -1066,11 +1185,11 @@ export const register: Register = (on, options) => {
             text
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
-          <Button key="up" hotkey="k" plain dimColor={scrolled === 0} onPress={scroll(-1)}>
+          <Button key="up" hotkey="k" plain dimColor={scrolled === 0} onPress={rowKey(-1)}>
             ▲
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
-          <Button key="down" hotkey="j" plain dimColor={scrolled >= maxScroll} onPress={scroll(1)}>
+          <Button key="down" hotkey="j" plain dimColor={scrolled >= maxScroll} onPress={rowKey(1)}>
             ▼
           </Button>
           <Box width={2} flexShrink={0} backgroundColor={HEADER_BG} />
@@ -1083,7 +1202,6 @@ export const register: Register = (on, options) => {
           </Button>
           <Box flexGrow={1} backgroundColor={HEADER_BG} />
         </Box>
-        {gapRows === 1 ? <Box width={width} height={1} flexShrink={0} backgroundColor={HEADER_BG} /> : null}
         {titles.map(title => (
           <Box width={width} height={1} flexShrink={0} overflow="hidden" backgroundColor={HEADER_BG}>
             <Text bold backgroundColor={HEADER_BG} wrap="truncate-end">
@@ -1094,7 +1212,8 @@ export const register: Register = (on, options) => {
         <Box width={width} height={1} flexShrink={0} overflow="hidden">
           <Text dimColor wrap="truncate-end">
             {hint}
-            {'─'.repeat(Math.max(0, width - hint.length - range.length - 2))}
+            {'─'.repeat(Math.max(0, width - hint.length - blocks.length - range.length - 2))}
+            {blocks}
             {range}
             {'──'}
           </Text>
@@ -1111,9 +1230,11 @@ export const register: Register = (on, options) => {
           if (line.head === undefined) {
             return (
               <Box flexDirection="row" width={width} height={1} flexShrink={0} overflow="hidden">
-                {gutter}
-                <Box width={inner} flexShrink={0} overflow="hidden">
-                  <Text color={line.color} dimColor={line.isDim} bold={line.isBold} wrap="truncate-end">
+                <Box width={GUTTER} flexShrink={0} backgroundColor={line.bg}>
+                  {gutter}
+                </Box>
+                <Box width={inner} flexShrink={0} overflow="hidden" backgroundColor={line.bg}>
+                  <Text color={line.color} dimColor={line.isDim} bold={line.isBold} backgroundColor={line.bg} wrap="truncate-end">
                     {line.text === '' ? ' ' : line.text}
                   </Text>
                 </Box>

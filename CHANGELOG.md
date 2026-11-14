@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.7.1 — 2026-11-14
+
 ### Side pane
 
 - What Claude wrote before a question it asks shows while the question is open when the transcript keeps it as thinking too.

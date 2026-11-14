@@ -758,32 +758,38 @@ class Transcript {
     } catch {}
     if (mtime !== this.liveMtime) {
       this.liveMtime = mtime
-      this.liveTurn = undefined
+      this.liveTurns = undefined
       try {
-        if (mtime !== undefined) this.liveTurn = sessionEntries(JSON.parse(fs.readFileSync(this.liveFile, 'utf8')))
+        if (mtime !== undefined) this.liveTurns = liveTurns(JSON.parse(fs.readFileSync(this.liveFile, 'utf8')))
       } catch {}
     } else if (!isFileChanged) return false
     const was = this.live
-    this.live = this.missing(this.liveTurn ?? [])
-    if (this.liveTurn !== undefined && this.live.length === 0) {
+    // The first form of the turn whose prompt is the transcript's newest.
+    const turn = this.liveTurns?.find(entries => this.isNewestPrompt(entries[0]))
+    this.live = turn === undefined ? [] : this.missing(turn)
+    if (this.liveTurns !== undefined && this.live.length === 0) {
       // The transcript has caught up: the conversation is not left lying in a file.
       try {
         if (fs.statSync(this.liveFile).mtimeMs === mtime) fs.rmSync(this.liveFile, { force: true })
       } catch {}
-      this.liveTurn = undefined
+      this.liveTurns = undefined
     }
     return was.length > 0 || this.live.length > 0
   }
 
-  /** The entries of `turn` (a prompt first) past the last one the transcript's newest turn holds; none for another turn. */
-  missing(turn) {
+  /** Whether `entry` is a prompt reading as the transcript's newest. */
+  isNewestPrompt(entry) {
     const from = this.prompts.at(-1)
-    if (turn[0]?.kind !== 'prompt' || from === undefined || this.entries[from].text !== turn[0].text) return []
-    const held = this.entries.slice(from + 1)
+    return entry?.kind === 'prompt' && from !== undefined && this.entries[from].text === entry.text
+  }
+
+  /** The entries of `turn` (the newest prompt first) past the last one the transcript's newest turn holds. */
+  missing(turn) {
+    const held = this.entries.slice(this.prompts.at(-1) + 1)
     const ids = new Set(held.flatMap(entry => (entry.kind === 'call' ? [entry.id] : [])))
-    const texts = new Set(held.flatMap(entry => (entry.kind === 'text' ? [entry.text.trim()] : [])))
+    const texts = new Set(held.flatMap(entry => (entry.kind === 'call' ? [] : [`${entry.kind}:${entry.text.trim()}`])))
     const rest = turn.slice(1)
-    const last = rest.findLastIndex(entry => (entry.kind === 'call' ? ids.has(entry.id) : texts.has(entry.text.trim())))
+    const last = rest.findLastIndex(entry => (entry.kind === 'call' ? ids.has(entry.id) : texts.has(`${entry.kind}:${entry.text.trim()}`)))
     return rest.slice(last + 1)
   }
 
@@ -963,6 +969,24 @@ function sessionEntries(messages) {
     }
   }
   return entries
+}
+
+/**
+ * The newest turn as a live file holds it, as entries, in the forms to try in
+ * order: the Messages API's (thinking kept), then the session's messages.
+ * A call put to the person, unanswered, may be missing from the API's form:
+ * the session's word for it is added.
+ */
+function liveTurns(data) {
+  if (Array.isArray(data)) return [sessionEntries(data)]
+  const session = sessionEntries(data?.session)
+  if (!Array.isArray(data?.api)) return [session]
+  const reader = new Transcript(() => undefined)
+  for (const message of data.api) {
+    if (Array.isArray(message?.content)) reader.show({ type: message.role, message })
+  }
+  const ids = new Set(reader.entries.flatMap(entry => (entry.kind === 'call' ? [entry.id] : [])))
+  return [[...reader.entries, ...session.filter(entry => entry.kind === 'call' && !ids.has(entry.id))], session]
 }
 
 /** The Claude config directory: `CLAUDE_CONFIG_DIR`, else ~/.claude. */

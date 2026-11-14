@@ -5,6 +5,11 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+### Side pane
+
+- What Claude wrote before a question it asks shows while the question is open when the transcript keeps it as thinking too.
+- The plugin hands the side pane the turn only when a dialog is put to you, not on every tool call whose permission auto mode settles.
+
 ## v0.7.0 — 2026-11-14
 
 ### Both panes

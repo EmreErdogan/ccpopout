@@ -575,16 +575,28 @@ async function liveFile($: EngineInterface): Promise<string | undefined> {
 /**
  * While a dialog waits for the person the session writes nothing to its
  * transcript: the side pane is handed the newest turn as the session holds
- * it, from its prompt, to show what its transcript still lacks.
+ * it, from its prompt, to show what its transcript still lacks. Twice over:
+ * as the session's messages, and in the Messages API's form, which keeps
+ * Claude's thinking and each block in its order.
  */
 async function writeLive($: EngineInterface): Promise<void> {
   const file = await liveFile($)
   if (file === undefined) return
-  const messages = await $.session.messages()
-  const from = messages.findLastIndex(message => promptText(message) !== '')
+  const session = await $.session.messages()
+  const from = session.findLastIndex(message => promptText(message) !== '')
   if (from === -1) return
+  let api: unknown[] | undefined
   try {
-    await $.fs.write(file, JSON.stringify(messages.slice(from)))
+    const messages = await $.session.messages({ as: 'api' })
+    const at = messages.findLastIndex(message => {
+      if (message.role !== 'user' || message.content.some(block => block.type === 'tool_result')) return false
+      const text = message.content.flatMap(block => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n')
+      return promptText({ role: 'user', text, toolUses: [] }) !== ''
+    })
+    if (at !== -1) api = messages.slice(at)
+  } catch {}
+  try {
+    await $.fs.write(file, JSON.stringify({ session: session.slice(from), api }))
   } catch {}
 }
 
@@ -850,14 +862,13 @@ export const register: Register = (on, options) => {
     return ran
   })
 
-  // A call put to the person: until it is answered the session writes nothing
-  // of its turn to the transcript, so the side pane is handed it.
-  on('tool.check', async ($, e, next) => {
-    const verdict = await next(e)
-    if (verdict.decision === 'ask' && e.tool_use_id !== undefined && e.agentId === undefined && (await read($, sidePane)) !== null) {
-      await writeLive($)
-    }
-    return verdict
+  // A dialog put to the person (a question, a permission): until it is
+  // answered the session writes nothing of its turn to the transcript, so the
+  // side pane is handed it. This fires only where the person is asked, not
+  // for an ask the mode settles (auto's classifier); the hook decides nothing.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    if (e.agent_id === undefined && (await read($, sidePane)) !== null) await writeLive($)
+    return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

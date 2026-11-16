@@ -1,6 +1,6 @@
 /** The multiplexer pane running the popout program, and the pane it split from. */
 export type SidePane = {
-  mux: 'herdr' | 'tmux'
+  mux: 'herdr' | 'tmux' | 'hc'
   id: string
   from: string
   direction: 'right' | 'left' | 'down'

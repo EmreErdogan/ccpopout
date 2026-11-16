@@ -652,7 +652,21 @@ async function herdrBin($: EngineInterface): Promise<string> {
   return (await $.env.get('HERDR_BIN_PATH')) ?? 'herdr'
 }
 
+async function hcBin($: EngineInterface): Promise<string> {
+  return (await $.env.get('HC_BIN_PATH')) ?? 'hc'
+}
+
+/** A herdr-core terminal as `hc get --json` shows it; undefined where it is not known. */
+async function hcTerminal($: EngineInterface, id: string): Promise<{ state?: string; labels?: Record<string, string> } | undefined> {
+  try {
+    return JSON.parse((await stdoutOf($, [await hcBin($), 'get', id, '--json'])) ?? '')
+  } catch {
+    return undefined
+  }
+}
+
 async function isSidePaneAlive($: EngineInterface, pane: SidePane): Promise<boolean> {
+  if (pane.mux === 'hc') return (await hcTerminal($, pane.id))?.state === 'live'
   if (pane.mux === 'herdr') return (await stdoutOf($, [await herdrBin($), 'pane', 'get', pane.id])) !== undefined
   const panes = await stdoutOf($, ['tmux', 'list-panes', '-a', '-F', '#{pane_id}'])
   return panes?.split('\n').includes(pane.id) ?? false
@@ -664,7 +678,12 @@ async function closeSidePane($: EngineInterface): Promise<boolean> {
   if (pane === null) return false
   await update($, sidePane, () => null)
   if (!(await isSidePaneAlive($, pane))) return false
-  const argv = pane.mux === 'herdr' ? [await herdrBin($), 'pane', 'close', pane.id] : ['tmux', 'kill-pane', '-t', pane.id]
+  const argv =
+    pane.mux === 'hc'
+      ? [await hcBin($), 'kill', pane.id]
+      : pane.mux === 'herdr'
+        ? [await herdrBin($), 'pane', 'close', pane.id]
+        : ['tmux', 'kill-pane', '-t', pane.id]
   return (await stdoutOf($, argv)) !== undefined
 }
 
@@ -680,12 +699,18 @@ async function sideOf($: EngineInterface, asked: Side | undefined): Promise<Side
  * runs in: beside Claude Code, on `side`, where there is room, zoomed over it
  * otherwise.
  *
+ * In Herdr Desktop (herdr-core, `hc`) the pane is a terminal started with the
+ * space and tab labels of this one: Desktop places it on the right, half the
+ * width, and leaves the focus here. Its side, size and zoom are not ours to set.
+ *
  * @returns '' once it is open (or was, and now has focus), 'none' where there
  *          is no multiplexer, else what went wrong
  */
 async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   const open = await read($, sidePane)
   if (open !== null && (await isSidePaneAlive($, open))) {
+    // hc has no focus to give: the open pane is left as it is.
+    if (open.mux === 'hc') return ''
     if (open.mux === 'tmux') await stdoutOf($, ['tmux', 'select-pane', '-t', open.id])
     else await stdoutOf($, [await herdrBin($), 'pane', 'focus', '--direction', open.direction, '--pane', open.from])
     return ''
@@ -693,7 +718,19 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
 
   const isHerdr = (await $.env.get('HERDR_ENV')) === '1'
   const isTmux = ((await $.env.get('TMUX')) ?? '') !== ''
-  if (!isHerdr && !isTmux) return 'none'
+  const hcFrom = isHerdr || isTmux ? undefined : await $.env.get('HC_TERMINAL_ID')
+  if (!isHerdr && !isTmux && (hcFrom ?? '') === '') return 'none'
+
+  // Herdr Desktop: a pane beside this one needs its space and tab. It is not
+  // zoomed where the terminal is narrow: Desktop sets its size, half the width.
+  let hcPlace: { space: string; tab: string } | undefined
+  if (hcFrom !== undefined && hcFrom !== '') {
+    const here = await hcTerminal($, hcFrom)
+    const space = here?.labels?.['herdr.space']
+    const tab = here?.labels?.['herdr.tab']
+    if (typeof space !== 'string' || typeof tab !== 'string') return 'none'
+    hcPlace = { space, tab }
+  }
 
   const node = (await stdoutOf($, ['node', '-p', 'process.execPath']))?.trim()
   if (node === undefined || node === '') return 'node was not found on PATH'
@@ -714,6 +751,26 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
       program.push('--snapshot', snapshot)
     }
   } catch {}
+
+  if (hcPlace !== undefined && hcFrom !== undefined) {
+    if (side === 'left') $.ui.toast('popout: hc opens side panes only on the right')
+    const hc = await hcBin($)
+    // hc runs from a narrow PATH: the program is named by its full path, as node is.
+    // --no-notify: no notes about the pane typed into this terminal.
+    const started = await stdoutOf($, [
+      hc, 'run', '--bg', '--no-notify', '--json', '--cwd', cwd,
+      '--label', `herdr.space=${hcPlace.space}`, '--label', `herdr.tab=${hcPlace.tab}`,
+      '--', ...program,
+    ])
+    let id: unknown
+    try {
+      id = JSON.parse(started ?? '{}').address
+    } catch {}
+    if (typeof id !== 'string' || id === '') return 'hc could not start the program'
+    const pane: SidePane = { mux: 'hc', id, from: hcFrom, direction: 'right' }
+    await update($, sidePane, () => pane)
+    return ''
+  }
 
   if (isHerdr) {
     const herdr = await herdrBin($)
@@ -768,7 +825,7 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
 async function showSidePane($: EngineInterface, asked?: Side): Promise<void> {
   const failure = await openSidePane($, await sideOf($, asked))
   if (failure === '') return
-  $.ui.toast(failure === 'none' ? 'popout: no herdr or tmux here, opened inside instead' : `popout: ${failure}, opened inside instead`)
+  $.ui.toast(failure === 'none' ? 'popout: no herdr, tmux or Herdr Desktop pane here, opened inside instead' : `popout: ${failure}, opened inside instead`)
   await openInnerPane($)
 }
 
@@ -787,17 +844,17 @@ export const register: Register = (on, options) => {
     // to a command, not to its arguments.
     await $.command.register({
       name: 'popout-side',
-      description: 'Read the session in a herdr or tmux pane beside Claude Code',
+      description: 'Read the session in a herdr, tmux or Herdr Desktop pane beside Claude Code',
       immediate: true,
     })
     await $.command.register({
       name: 'popout-left',
-      description: 'Read the session in a herdr or tmux pane left of Claude Code',
+      description: 'Read the session in a herdr, tmux or Herdr Desktop pane left of Claude Code',
       immediate: true,
     })
     await $.command.register({
       name: 'popout-right',
-      description: 'Read the session in a herdr or tmux pane right of Claude Code',
+      description: 'Read the session in a herdr, tmux or Herdr Desktop pane right of Claude Code',
       immediate: true,
     })
     return next(e)

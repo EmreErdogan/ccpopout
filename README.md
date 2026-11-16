@@ -13,16 +13,16 @@ It comes in two forms that behave the same:
 
 - **In-app pane** (`/popout`): a pane inside Claude Code.
 - **Side pane** (`/popout side`): a separate terminal program in a
-  herdr or tmux pane next to Claude Code, at full height, following the
-  session live.
+  herdr, tmux or Herdr Desktop pane next to Claude Code, at full height,
+  following the session live.
 
 ## Requirements
 
 - Claude Code with plugin hooks modules. Developed and tested on 2.1.289; the
   API it uses is new and may change between releases.
 - For the side pane: Node.js 20 or newer on `PATH`, and Claude Code running
-  inside herdr or tmux. Without a multiplexer `/popout side` opens the in-app
-  pane instead.
+  inside herdr, tmux or Herdr Desktop (herdr-core, `hc`). Without one of
+  them `/popout side` opens the in-app pane instead.
 - Mouse support in the in-app pane needs Claude Code's fullscreen layout.
 
 ## Install
@@ -71,7 +71,7 @@ The help (`h`) names the version a session runs, in its first row:
 | Command | What it does |
 | --- | --- |
 | `/popout` | Opens the in-app pane on your newest message. |
-| `/popout side` | Opens the side pane in herdr or tmux. Beside Claude Code when the terminal is at least 140 columns wide (on the right, unless [set](#side-pane-side) otherwise), otherwise zoomed over it. |
+| `/popout side` | Opens the side pane in herdr, tmux or [Herdr Desktop](#herdr-desktop). Beside Claude Code when the terminal is at least 140 columns wide (on the right, unless [set](#side-pane-side) otherwise), otherwise zoomed over it. |
 | `/popout left`, `/popout right` | Opens the side pane on that side of Claude Code, whatever the setting. |
 | `/popout close` | Closes the side pane. |
 | `/popout-side`, `/popout-left`, `/popout-right` | The same as `/popout side`, `left` and `right`, as commands of their own so a key can be bound to them. |
@@ -92,6 +92,24 @@ Code. To have them open it on the left, set the plugin's `side` option to
 
 The environment variable `CCPOPOUT_SIDE=left` (or `right`) does the same, and
 wins over the setting.
+
+### Herdr Desktop
+
+In a terminal Herdr Desktop opened (`HC_TERMINAL_ID` set, `HERDR_ENV` not),
+`/popout side` starts the popout program with herdr-core:
+`hc run --bg --no-notify` with the space and tab labels of Claude Code's
+terminal. Desktop adds it to the same tab, on the right at half the width, and
+the focus stays on Claude Code. Desktop decides where the pane goes, so:
+
+- It always opens on the right. `/popout left` (or the `left` setting) opens
+  it there too, and says so.
+- It is never zoomed: however narrow the terminal, it opens beside Claude
+  Code at half the width.
+- With the side pane already open, `/popout side` leaves it as it is.
+
+`/popout close` ends it with `hc kill`. Set `HC_BIN_PATH` to the `hc` program
+where it is not on `PATH`. herdr (`HERDR_ENV=1`) and tmux (`TMUX`) are used
+first when Claude Code runs inside them.
 
 ### Clean view
 

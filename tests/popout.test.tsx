@@ -722,8 +722,88 @@ test('/popout side falls back to the pane inside where there is no multiplexer',
   const { ran, toasts, opened } = host(on, {}, () => '')
   await $.command.run(typed('popout', 'side'))
   expect(ran).toEqual([])
-  expect(toasts.join(' ')).toContain('no herdr or tmux')
+  expect(toasts.join(' ')).toContain('no herdr, tmux or Herdr Desktop pane')
   expect(opened).toEqual(['popout'])
 
   expect((await $.command.run(typed('popout', 'sideways'))).text).toContain('Usage')
+})
+
+/** Herdr Desktop: `hc get` of this terminal, `cols` wide, and a run that starts t9. */
+const hcHost = (cols: number, labels: Record<string, string> = { 'herdr.space': 'sp1', 'herdr.tab': 'tb1' }) => {
+  let isAlive = false
+  return {
+    isAlive: () => isAlive,
+    answer: (argv: readonly string[]) => {
+      if (argv[0] === 'node') return '/usr/bin/node\n'
+      if (argv[1] === 'get' && argv[2] === 't4') return JSON.stringify({ address: 't4', state: 'live', cols, labels })
+      if (argv[1] === 'get') return isAlive ? JSON.stringify({ address: 't9', state: 'live' }) : JSON.stringify({ address: 't9', state: 'finished' })
+      if (argv[1] === 'run') {
+        isAlive = true
+        return JSON.stringify({ address: 't9', state: 'live' })
+      }
+      if (argv[1] === 'kill') isAlive = false
+      return '{}'
+    },
+  }
+}
+
+test('/popout side starts the popout program in a Herdr Desktop pane beside this one', async ($, on) => {
+  const hc = hcHost(200)
+  const { ran, toasts, opened } = host(on, { HC_TERMINAL_ID: 't4', HC_BIN_PATH: '/bin/hc' }, hc.answer)
+
+  await $.command.run(typed('popout', 'side'))
+  const run = ran.find(argv => argv[1] === 'run') ?? []
+  expect(run.slice(0, 13)).toEqual([
+    '/bin/hc', 'run', '--bg', '--no-notify', '--json', '--cwd', "/work/it's here",
+    '--label', 'herdr.space=sp1', '--label', 'herdr.tab=tb1', '--', '/usr/bin/node',
+  ])
+  expect(run[13]).toMatch(/^\/.*\/tui\/popout\.mjs$/)
+  expect(run.slice(14, 18)).toEqual(['--session', 'abc-123', '--cwd', "/work/it's here"])
+  expect(toasts).toEqual([])
+  expect(opened).toEqual([])
+
+  // Open already: nothing more starts, and nothing is said.
+  await $.command.run(typed('popout-side'))
+  expect(ran.filter(argv => argv[1] === 'run').length).toBe(1)
+  expect(ran.at(-1)).toEqual(['/bin/hc', 'get', 't9', '--json'])
+  expect(toasts).toEqual([])
+
+  await $.command.run(typed('popout', 'close'))
+  expect(ran.at(-1)).toEqual(['/bin/hc', 'kill', 't9'])
+  expect(hc.isAlive()).toBe(false)
+})
+
+test('/popout left in Herdr Desktop opens on the right, and says so', async ($, on) => {
+  const { ran, toasts } = host(on, { HC_TERMINAL_ID: 't4' }, hcHost(200).answer)
+  await $.command.run(typed('popout', 'left'))
+  expect(ran.find(argv => argv[1] === 'run')?.[0]).toBe('hc')
+  expect(toasts).toEqual(['popout: hc opens side panes only on the right'])
+})
+
+test('/popout side in a narrow Herdr Desktop terminal still opens a pane beside it', async ($, on) => {
+  const { ran, toasts, opened } = host(on, { HC_TERMINAL_ID: 't4' }, hcHost(100).answer)
+  await $.command.run(typed('popout', 'side'))
+  expect(ran.some(argv => argv[1] === 'run')).toBe(true)
+  expect(toasts).toEqual([])
+  expect(opened).toEqual([])
+})
+
+test('/popout side in an hc terminal outside Herdr Desktop opens the pane inside', async ($, on) => {
+  const { ran, toasts, opened } = host(on, { HC_TERMINAL_ID: 't4' }, hcHost(200, {}).answer)
+  await $.command.run(typed('popout', 'side'))
+  expect(ran.some(argv => argv[1] === 'run')).toBe(false)
+  expect(toasts.join(' ')).toContain('no herdr, tmux or Herdr Desktop pane')
+  expect(opened).toEqual(['popout'])
+})
+
+test('herdr and tmux come before hc', async ($, on) => {
+  const { ran } = host(on, { TMUX: '/tmp/tmux-1000/default,1,0', TMUX_PANE: '%3', HC_TERMINAL_ID: 't4' }, argv => {
+    if (argv[0] === 'node') return '/usr/bin/node\n'
+    if (argv[1] === 'display-message') return '180\n'
+    if (argv[1] === 'split-window') return '%7\n'
+    return ''
+  })
+  await $.command.run(typed('popout', 'side'))
+  expect(ran.some(argv => argv[0] === 'hc')).toBe(false)
+  expect(ran.some(argv => argv[1] === 'split-window')).toBe(true)
 })

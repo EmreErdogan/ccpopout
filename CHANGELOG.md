@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.8.0 — 2026-11-16
+
 ### Side pane
 
 - `/popout side` opens the side pane in Herdr Desktop too, through herdr-core (`hc`): in Claude Code's tab, on the right. There it opens only on the right, at half the width however narrow the terminal is, and says so when the left is asked for. `HC_BIN_PATH` names the `hc` program.

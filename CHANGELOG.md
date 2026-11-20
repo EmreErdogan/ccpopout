@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.8.1 — 2026-11-20
+
 ### Side pane
 
 - It follows the session where Claude Code runs with its own `CLAUDE_CONFIG_DIR`, in Herdr Desktop too: the pane, started by `hc` with hc's environment, looked for the transcript in `~/.claude` and, not finding it there, stayed as it was when opened.

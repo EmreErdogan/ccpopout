@@ -739,12 +739,15 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   const program = [node, `${$.plugin.root}/${TUI}`, '--session', session, '--cwd', cwd]
   // The view it starts in where none was chosen yet; it reads the one last chosen itself.
   program.push(settingClean ? '--clean' : '--full')
+  // The pane may not have this session's environment: its transcript is found
+  // under the config directory named here, not one the pane guesses.
+  const config = await configDir($)
+  if (config !== undefined) program.push('--config', config)
   const live = await liveFile($)
   if (live !== undefined) program.push('--live', live)
   // A session just resumed holds its history in memory, its file empty until
   // the next message: the program starts from this snapshot, and removes it.
   try {
-    const config = await configDir($)
     if (config !== undefined) {
       const snapshot = `${config}/ccpopout-snapshot-${session}.json`
       await $.fs.write(snapshot, JSON.stringify(await $.session.messages()))

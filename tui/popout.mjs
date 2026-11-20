@@ -4,7 +4,7 @@
 // session's transcript file.
 //
 //   node popout.mjs <transcript.jsonl>
-//   node popout.mjs --session <id> [--cwd <dir>] [--snapshot <messages.json>] [--live <messages.json>] [--clean|--full]
+//   node popout.mjs --session <id> [--cwd <dir>] [--config <dir>] [--snapshot <messages.json>] [--live <messages.json>] [--clean|--full]
 //
 // A session just resumed has its history in memory only, its file filled at
 // the next message: until then the view shows the snapshot its opener wrote.
@@ -2045,6 +2045,7 @@ function parseArgs(argv) {
     else if (argv[at] === '--clean') args.isClean = true
     else if (argv[at] === '--full') args.isClean = false
     else if (argv[at] === '--cwd') args.cwd = argv[++at]
+    else if (argv[at] === '--config') args.config = argv[++at]
     else if (argv[at] === '--help' || argv[at] === '-h') args.isHelp = true
     else if (argv[at] === '--version') args.isVersion = true
     else args.file = argv[at]
@@ -2068,6 +2069,10 @@ function main() {
     process.stderr.write('popout: needs a terminal\n')
     process.exit(2)
   }
+  // The session's config directory, named by the opener: a pane started by a
+  // multiplexer (Herdr Desktop's core, a tmux server) has that program's
+  // environment, not the session's, and may lack its CLAUDE_CONFIG_DIR.
+  if (args.config !== undefined && args.config !== '') process.env.CLAUDE_CONFIG_DIR = args.config
 
   const transcript = new Transcript(transcriptResolver(args), args.live)
   const view = new View(transcript, process.stdout)

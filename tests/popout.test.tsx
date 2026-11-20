@@ -749,7 +749,7 @@ const hcHost = (cols: number, labels: Record<string, string> = { 'herdr.space': 
 
 test('/popout side starts the popout program in a Herdr Desktop pane beside this one', async ($, on) => {
   const hc = hcHost(200)
-  const { ran, toasts, opened } = host(on, { HC_TERMINAL_ID: 't4', HC_BIN_PATH: '/bin/hc' }, hc.answer)
+  const { ran, toasts, opened } = host(on, { HC_TERMINAL_ID: 't4', HC_BIN_PATH: '/bin/hc', CLAUDE_CONFIG_DIR: '/home/u/.claude1' }, hc.answer)
 
   await $.command.run(typed('popout', 'side'))
   const run = ran.find(argv => argv[1] === 'run') ?? []
@@ -759,6 +759,8 @@ test('/popout side starts the popout program in a Herdr Desktop pane beside this
   ])
   expect(run[13]).toMatch(/^\/.*\/tui\/popout\.mjs$/)
   expect(run.slice(14, 18)).toEqual(['--session', 'abc-123', '--cwd', "/work/it's here"])
+  // hc starts it with its own environment: the session's config directory is named.
+  expect(run.slice(run.indexOf('--config'), run.indexOf('--config') + 2)).toEqual(['--config', '/home/u/.claude1'])
   expect(toasts).toEqual([])
   expect(opened).toEqual([])
 

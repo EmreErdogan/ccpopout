@@ -4,7 +4,7 @@
 // session's transcript file.
 //
 //   node popout.mjs <transcript.jsonl>
-//   node popout.mjs --session <id> [--cwd <dir>] [--config <dir>] [--snapshot <messages.json>] [--live <messages.json>] [--clean|--full]
+//   node popout.mjs --session <id> [--cwd <dir>] [--config <dir>] [--snapshot <messages.json>] [--live <messages.json>] [--clean|--full] [--tz <zone>]
 //
 // A session just resumed has its history in memory only, its file filled at
 // the next message: until then the view shows the snapshot its opener wrote.
@@ -2046,6 +2046,7 @@ function parseArgs(argv) {
     else if (argv[at] === '--full') args.isClean = false
     else if (argv[at] === '--cwd') args.cwd = argv[++at]
     else if (argv[at] === '--config') args.config = argv[++at]
+    else if (argv[at] === '--tz') args.tz = argv[++at]
     else if (argv[at] === '--help' || argv[at] === '-h') args.isHelp = true
     else if (argv[at] === '--version') args.isVersion = true
     else args.file = argv[at]
@@ -2055,6 +2056,8 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
+  // A pane started without the user's shell lacks its TZ: times follow the session's.
+  if (args.tz) process.env.TZ = args.tz
   if (args.isVersion) {
     process.stdout.write(`ccpopout ${VERSION}\n`)
     process.exit(0)

@@ -743,6 +743,9 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   // under the config directory named here, not one the pane guesses.
   const config = await configDir($)
   if (config !== undefined) program.push('--config', config)
+  // hc and herdr start the program without the user's shell profile, where TZ is often set.
+  const tz = await $.env.get('TZ')
+  if (tz !== undefined && tz !== '') program.push('--tz', tz)
   const live = await liveFile($)
   if (live !== undefined) program.push('--live', live)
   // A session just resumed holds its history in memory, its file empty until

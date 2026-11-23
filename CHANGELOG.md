@@ -5,6 +5,12 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.8.2 — 2026-11-23
+
+### Side pane
+
+- Times in the side pane follow the session's time zone (`TZ`) in herdr and Herdr Desktop too, where the pane starts without the shell profile that sets it.
+
 ## v0.8.1 — 2026-11-20
 
 ### Side pane

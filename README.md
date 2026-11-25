@@ -74,6 +74,7 @@ The help (`h`) names the version a session runs, in its first row:
 | `/popout side` | Opens the side pane in herdr, tmux or [Herdr Desktop](#herdr-desktop). Beside Claude Code when the terminal is at least 140 columns wide (on the right, unless [set](#side-pane-side) otherwise), otherwise zoomed over it. |
 | `/popout left`, `/popout right` | Opens the side pane on that side of Claude Code, whatever the setting. |
 | `/popout close` | Closes the side pane. |
+| `/popout keys add` | Adds keys for ccpopout to your key bindings ([more](#key-bindings)). `/popout keys remove` takes them out; `/popout keys` shows which keys. |
 | `/popout-side`, `/popout-left`, `/popout-right` | The same as `/popout side`, `left` and `right`, as commands of their own so a key can be bound to them. |
 
 ### Side pane side
@@ -98,14 +99,54 @@ wins over the setting.
 In a terminal Herdr Desktop opened (`HC_TERMINAL_ID` set, `HERDR_ENV` not),
 `/popout side` starts the popout program with herdr-core:
 `hc run --bg --no-notify` with the space and tab labels of Claude Code's
-terminal. Desktop adds it to the same tab, on the right at half the width, and
-the focus stays on Claude Code. Desktop decides where the pane goes, so:
+terminal. Desktop adds it to the same tab, on the right at half the width.
+Desktop decides where the pane goes, so:
 
-- It always opens on the right. `/popout left` (or the `left` setting) opens
-  it there too, and says so.
+- It opens on the right. On the left (`/popout left`, or the `left` setting)
+  it needs the ccpopout mod in Desktop, below; without it, the pane stays on
+  the right and the plugin says so.
+- The focus goes to the new pane, as in herdr, with the mod; without it, the
+  focus stays on Claude Code.
 - It is never zoomed: however narrow the terminal, it opens beside Claude
   Code at half the width.
-- With the side pane already open, `/popout side` leaves it as it is.
+- With the side pane already open, `/popout side` gives it the focus (with
+  the mod) and otherwise leaves it as it is.
+
+#### The ccpopout mod
+
+Desktop has no way to start a terminal on the left or to focus it, but a mod
+in Desktop can swap two panes and focus one. The plugin labels the popout
+terminal, and the mod in [`herdr-app/ccpopout`](herdr-app/ccpopout) acts on
+the labels:
+
+- `ccpopout.side=left` and `ccpopout.from=<Claude Code's terminal>`: it swaps
+  the pane with Claude Code's and labels it `ccpopout.placed=left`. The plugin
+  waits up to three seconds for that label.
+- `ccpopout.focus=<time>`, set when the pane opens and again by `/popout side`
+  while it is open: it focuses the pane, once for each value.
+
+It works where Claude Code runs on another machine than Desktop too: the mod
+runs in Desktop, on the computer you look at.
+
+To install it, on the computer Desktop runs on, with Desktop open and
+Node.js 18 or newer, from a clone of this repository:
+
+```sh
+node herdr-app/install.mjs     # install, or update
+node herdr-app/uninstall.mjs   # remove
+```
+
+Or ask your agent there: "Install the ccpopout Herdr Desktop mod by
+following https://github.com/EmreErdogan/ccpopout/blob/main/herdr-app/INSTALL.md"
+(or "Uninstall ..."). [`herdr-app/INSTALL.md`](herdr-app/INSTALL.md) tells
+it what to check first and what each failure means.
+
+Desktop adds no mods to the layouts it ships (Herdr, Terminals, Herdr 98).
+Where the window shows one, the installer duplicates it as
+`<name>-ccpopout` and switches to that, which looks the same. Then it adds
+the mod's block, 0 px wide and drawing nothing, to the layout shown. The
+uninstaller takes the block out of every layout, switches back from
+`<name>-ccpopout` (keeping that file) and deletes the mod.
 
 `/popout close` ends it with `hc kill`. Set `HC_BIN_PATH` to the `hc` program
 where it is not on `PATH`. herdr (`HERDR_ENV=1`) and tmux (`TMUX`) are used
@@ -132,8 +173,35 @@ remove that file to go back to the setting.
 
 ### Key bindings
 
-A plugin cannot add key bindings for you. To open ccpopout with a key, add this
-to `~/.claude/keybindings.json` (merge it with what is already there):
+If you open ccpopout often, give it a key. Run this once:
+
+```
+/popout keys add
+```
+
+and you can open it from the prompt with:
+
+| Press | To |
+| --- | --- |
+| `ctrl+x r` | read the session here, in the in-app pane (`/popout`) |
+| `ctrl+x t` | open the side pane (`/popout-side`) |
+| `ctrl+x l` | open the side pane on the left (`/popout-left`) |
+
+`/popout keys add` writes them into your `keybindings.json` and tells you
+what it did. Your other key bindings stay as they are, and if you already use
+one of these keys for something else, it keeps yours and says which one, so
+you can pick another key for it yourself.
+
+With more than one Claude profile, it writes to the profile of the session
+you run it in: `keybindings.json` in `CLAUDE_CONFIG_DIR` where that is set,
+otherwise in `~/.claude`. Its message names the file. For another profile,
+run it again in a session of that one.
+
+Changed your mind? `/popout keys remove` takes ccpopout's keys out again,
+and nothing else.
+
+You can also add them by hand. In `~/.claude/keybindings.json`, next to
+what is already there:
 
 ```json
 {

@@ -299,7 +299,7 @@ const splitCells = line =>
     .split(/(?<!\\)\|/)
     .map(cell => cell.trim().replace(/\\\|/g, '|'))
 
-/** A markdown table as boxed rows, its columns shrunk to fit `width`. */
+/** A markdown table as boxed rows, a rule between each two, its columns shrunk to fit `width`. */
 function tableRows(lines, width) {
   const header = splitCells(lines[0])
   const aligns = splitCells(lines[1]).map(cell => (/^:-+:$/.test(cell) ? 'center' : /-:$/.test(cell) ? 'right' : 'left'))
@@ -332,7 +332,7 @@ function tableRows(lines, width) {
       })
       out.push({ segs })
     }
-    if (at === 0) out.push(rule('├', '┼', '┤'))
+    if (at < all.length - 1) out.push(rule('├', '┼', '┤'))
   })
   out.push(rule('└', '┴', '┘'))
   return out

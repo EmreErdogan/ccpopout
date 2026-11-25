@@ -615,6 +615,8 @@ const host = (on: Parameters<TestBody>[1], env: Record<string, string>, answer: 
   })
   on('ui.scroll', () => ({}))
   on('clock.sleep', () => ({ value: undefined }))
+  let now = 1000
+  on('clock.now', () => ({ value: now++ }))
   on('process.run', (_$, e) => {
     ran.push([...e.argv])
     const stdout = answer(e.argv)
@@ -729,14 +731,14 @@ test('/popout side falls back to the pane inside where there is no multiplexer',
 })
 
 /** Herdr Desktop: `hc get` of this terminal, `cols` wide, and a run that starts t9. */
-const hcHost = (cols: number, labels: Record<string, string> = { 'herdr.space': 'sp1', 'herdr.tab': 'tb1' }) => {
+const hcHost = (cols: number, labels: Record<string, string> = { 'herdr.space': 'sp1', 'herdr.tab': 'tb1' }, placed: Record<string, string> = {}) => {
   let isAlive = false
   return {
     isAlive: () => isAlive,
     answer: (argv: readonly string[]) => {
       if (argv[0] === 'node') return '/usr/bin/node\n'
       if (argv[1] === 'get' && argv[2] === 't4') return JSON.stringify({ address: 't4', state: 'live', cols, labels })
-      if (argv[1] === 'get') return isAlive ? JSON.stringify({ address: 't9', state: 'live' }) : JSON.stringify({ address: 't9', state: 'finished' })
+      if (argv[1] === 'get') return isAlive ? JSON.stringify({ address: 't9', state: 'live', labels: placed }) : JSON.stringify({ address: 't9', state: 'finished' })
       if (argv[1] === 'run') {
         isAlive = true
         return JSON.stringify({ address: 't9', state: 'live' })
@@ -753,21 +755,22 @@ test('/popout side starts the popout program in a Herdr Desktop pane beside this
 
   await $.command.run(typed('popout', 'side'))
   const run = ran.find(argv => argv[1] === 'run') ?? []
-  expect(run.slice(0, 13)).toEqual([
+  // The focus label asks Desktop's ccpopout mod to focus the pane.
+  expect(run.slice(0, 15)).toEqual([
     '/bin/hc', 'run', '--bg', '--no-notify', '--json', '--cwd', "/work/it's here",
-    '--label', 'herdr.space=sp1', '--label', 'herdr.tab=tb1', '--', '/usr/bin/node',
+    '--label', 'herdr.space=sp1', '--label', 'herdr.tab=tb1', '--label', 'ccpopout.focus=1000', '--', '/usr/bin/node',
   ])
-  expect(run[13]).toMatch(/^\/.*\/tui\/popout\.mjs$/)
-  expect(run.slice(14, 18)).toEqual(['--session', 'abc-123', '--cwd', "/work/it's here"])
+  expect(run[15]).toMatch(/^\/.*\/tui\/popout\.mjs$/)
+  expect(run.slice(16, 20)).toEqual(['--session', 'abc-123', '--cwd', "/work/it's here"])
   // hc starts it with its own environment: the session's config directory is named.
   expect(run.slice(run.indexOf('--config'), run.indexOf('--config') + 2)).toEqual(['--config', '/home/u/.claude1'])
   expect(toasts).toEqual([])
   expect(opened).toEqual([])
 
-  // Open already: nothing more starts, and nothing is said.
+  // Open already: nothing more starts, nothing is said, and the focus is asked for again.
   await $.command.run(typed('popout-side'))
   expect(ran.filter(argv => argv[1] === 'run').length).toBe(1)
-  expect(ran.at(-1)).toEqual(['/bin/hc', 'get', 't9', '--json'])
+  expect(ran.at(-1)).toEqual(['/bin/hc', 'label', 't9', 'ccpopout.focus=1001'])
   expect(toasts).toEqual([])
 
   await $.command.run(typed('popout', 'close'))
@@ -775,11 +778,28 @@ test('/popout side starts the popout program in a Herdr Desktop pane beside this
   expect(hc.isAlive()).toBe(false)
 })
 
-test('/popout left in Herdr Desktop opens on the right, and says so', async ($, on) => {
+test('/popout left in Herdr Desktop asks the ccpopout mod to move it left', async ($, on) => {
+  const { ran, toasts } = host(on, { HC_TERMINAL_ID: 't4' }, hcHost(200, undefined, { 'ccpopout.placed': 'left' }).answer)
+  await $.command.run(typed('popout', 'left'))
+  const run = ran.find(argv => argv[1] === 'run') ?? []
+  expect(run[0]).toBe('hc')
+  expect(run.slice(11, 15)).toEqual(['--label', 'ccpopout.side=left', '--label', 'ccpopout.from=t4'])
+  expect(ran.at(-1)).toEqual(['hc', 'get', 't9', '--json'])
+  expect(toasts).toEqual([])
+})
+
+test('/popout left in Herdr Desktop without the mod stays on the right, and says so', async ($, on) => {
   const { ran, toasts } = host(on, { HC_TERMINAL_ID: 't4' }, hcHost(200).answer)
   await $.command.run(typed('popout', 'left'))
-  expect(ran.find(argv => argv[1] === 'run')?.[0]).toBe('hc')
-  expect(toasts).toEqual(['popout: hc opens side panes only on the right'])
+  expect(ran.filter(argv => argv[1] === 'get' && argv[2] === 't9').length).toBe(20)
+  expect(toasts).toEqual(['popout: Herdr Desktop opened it on the right; its ccpopout mod moves it left (see the README)'])
+})
+
+test('/popout right in Herdr Desktop asks only for the focus, and does not wait', async ($, on) => {
+  const { ran } = host(on, { HC_TERMINAL_ID: 't4' }, hcHost(200).answer)
+  await $.command.run(typed('popout', 'right'))
+  expect((ran.find(argv => argv[1] === 'run') ?? []).filter(arg => arg.startsWith('ccpopout.'))).toEqual(['ccpopout.focus=1000'])
+  expect(ran.some(argv => argv[1] === 'get' && argv[2] === 't9')).toBe(false)
 })
 
 test('/popout side in a narrow Herdr Desktop terminal still opens a pane beside it', async ($, on) => {
@@ -808,4 +828,83 @@ test('herdr and tmux come before hc', async ($, on) => {
   await $.command.run(typed('popout', 'side'))
   expect(ran.some(argv => argv[0] === 'hc')).toBe(false)
   expect(ran.some(argv => argv[1] === 'split-window')).toBe(true)
+})
+
+/** keybindings.json in a map of files, as `fs.read` and `fs.write` see it, and `/popout keys` run on it. */
+const keysHost = ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], text?: string) => {
+  const KEYS_FILE = '/home/u/.claude/keybindings.json'
+  const files = new Map<string, string>(text === undefined ? [] : [[KEYS_FILE, text]])
+  const writes: string[] = []
+  on('fs.read', (_$, e) => (files.has(e.path) ? { value: files.get(e.path) as string } : { deny: 'ENOENT' }) as never)
+  on('fs.write', (_$, e) => {
+    files.set(e.path, e.text)
+    writes.push(e.path)
+    return { value: undefined }
+  })
+  host(on, { HOME: '/home/u' }, () => '')
+  return {
+    writes,
+    keys: () => JSON.parse(files.get(KEYS_FILE) ?? 'null'),
+    run: async (args: string) => (await $.command.run(typed('popout', args))).text ?? '',
+  }
+}
+
+const OURS = { 'ctrl+x r': 'command:popout', 'ctrl+x t': 'command:popout-side', 'ctrl+x l': 'command:popout-left' }
+
+test('/popout keys add adds the key bindings, once', async ($, on) => {
+  const { keys, run, writes } = keysHost($, on)
+  const text = await run('keys add')
+  expect(keys()).toEqual({ bindings: [{ context: 'Chat', bindings: OURS }] })
+  expect(text).toContain('Added to /home/u/.claude/keybindings.json:')
+  expect(text).toContain('ctrl+x t  →  /popout-side')
+  expect(text).toContain('/popout keys remove')
+
+  // Already there: nothing written, and it says so.
+  expect(await run('keys add')).toContain("ccpopout's keys are already in /home/u/.claude/keybindings.json:")
+  expect(writes.length).toBe(1)
+})
+
+test('/popout keys add leaves a key used for something else, and the rest of the file', async ($, on) => {
+  const mine = { $schema: 'x', bindings: [{ context: 'Global', bindings: { 'ctrl+g': 'app:x' } }, { context: 'Chat', bindings: { 'ctrl+x r': 'command:review' } }] }
+  const { keys, run } = keysHost($, on, JSON.stringify(mine))
+  const text = await run('keys add')
+  expect(keys()).toEqual({
+    $schema: 'x',
+    bindings: [
+      { context: 'Global', bindings: { 'ctrl+g': 'app:x' } },
+      { context: 'Chat', bindings: { 'ctrl+x r': 'command:review', 'ctrl+x t': 'command:popout-side', 'ctrl+x l': 'command:popout-left' } },
+    ],
+  })
+  expect(text).toContain('Left alone, because you use this key for something else:\n  ctrl+x r')
+})
+
+test('/popout keys remove takes out only the keys bound to ccpopout', async ($, on) => {
+  const mine = { bindings: [{ context: 'Chat', bindings: { 'ctrl+y': 'command:other' } }] }
+  const { keys, run } = keysHost($, on, JSON.stringify(mine))
+  await run('keys add')
+  expect(keys().bindings[0].bindings).toEqual({ 'ctrl+y': 'command:other', ...OURS })
+  expect(await run('keys  remove')).toContain("Removed ccpopout's keys from /home/u/.claude/keybindings.json:")
+  expect(keys()).toEqual(mine)
+  expect(await run('keys remove')).toContain('nothing to remove')
+})
+
+test('/popout keys remove drops a Chat block that held only its keys', async ($, on) => {
+  const { keys, run } = keysHost($, on)
+  await run('keys add')
+  await run('keys remove')
+  expect(keys()).toEqual({ bindings: [] })
+})
+
+test('/popout keys add leaves a keybindings.json that is not JSON alone', async ($, on) => {
+  const { writes, run } = keysHost($, on, '{ "bindings": [ // mine\n')
+  expect(await run('keys add')).toContain('is not plain JSON (it may have comments), so ccpopout left it alone')
+  expect(writes).toEqual([])
+})
+
+test('/popout keys alone names the keys and changes nothing', async ($, on) => {
+  const { writes, run } = keysHost($, on)
+  const text = await run('keys')
+  expect(text).toContain('ctrl+x r  →  /popout')
+  expect(text).toContain('/popout keys add')
+  expect(writes).toEqual([])
 })

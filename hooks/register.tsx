@@ -34,12 +34,21 @@ const ROOMY_ROWS = 16
 const TUI = 'tui/popout.mjs'
 /** From this many columns the side pane splits off to one side; below, it opens zoomed. */
 const WIDE_COLUMNS = 140
+/** How long a left pane in Herdr Desktop waits for the ccpopout mod to move it, in ms. */
+const HC_PLACE_MS = 3000
+const HC_PLACE_POLL_MS = 150
 
 type Side = 'right' | 'left'
 /** The side `/popout side` opens on: the plugin's `side` setting, read at load. */
 let settingSide: Side = 'right'
 /** Whether the panes open in the clean view where none was chosen yet: the plugin's `clean` setting. */
 let settingClean = true
+/** The chords `/popout keys add` binds in the Chat context, each to the action it runs. */
+const KEYS: Readonly<Record<string, string>> = {
+  'ctrl+x r': 'command:popout',
+  'ctrl+x t': 'command:popout-side',
+  'ctrl+x l': 'command:popout-left',
+}
 /** How many rows above the window's middle the row being read is: about where the eye rests. */
 const READ_LIFT = 2
 
@@ -546,6 +555,90 @@ async function configDir($: EngineInterface): Promise<string | undefined> {
   }
 }
 
+/** A chord and the command it runs, as the messages of `/popout keys` and `keys add` name them. */
+const keyLine = (chord: string) => `  ${chord}  →  /${KEYS[chord]?.replace(/^command:/, '')}`
+
+/**
+ * `/popout keys add`: puts ccpopout's chords (KEYS) into keybindings.json in the
+ * config directory, in the Chat context; `/popout keys remove` takes out the
+ * chords bound to ccpopout's commands. A chord bound to something else is
+ * left as it is. A file that is not JSON (comments, say) is not touched.
+ *
+ * @returns what it did, to print
+ */
+async function keysCommand($: EngineInterface, isAdding: boolean): Promise<string> {
+  const config = await configDir($)
+  if (config === undefined) return 'ccpopout could not find the Claude config directory, so it added no keys.'
+  const path = `${config}/keybindings.json`
+  const byHand = `Nothing was changed. You can add the keys yourself: the README's "Key bindings" section shows how.`
+  let text = ''
+  try {
+    text = await $.fs.read(path)
+  } catch {}
+  let file: { bindings?: unknown }
+  try {
+    file = text.trim() === '' ? {} : JSON.parse(text)
+  } catch {
+    return `${path} is not plain JSON (it may have comments), so ccpopout left it alone. ${byHand}`
+  }
+  const blocks = file?.bindings ?? []
+  if (file === null || typeof file !== 'object' || Array.isArray(file) || !Array.isArray(blocks)) {
+    return `${path} does not look like a key bindings file, so ccpopout left it alone. ${byHand}`
+  }
+  type Block = { context?: unknown; bindings?: Record<string, unknown> }
+  const chat = (blocks as Block[]).filter(
+    block => block !== null && typeof block === 'object' && block.context === 'Chat' && block.bindings !== null && typeof block.bindings === 'object',
+  )
+  const save = () => $.fs.write(path, `${JSON.stringify({ ...file, bindings: file.bindings ?? blocks }, null, 2)}\n`)
+
+  if (!isAdding) {
+    const removed: string[] = []
+    for (const block of chat) {
+      for (const [chord, action] of Object.entries(KEYS)) {
+        if (block.bindings?.[chord] !== action) continue
+        delete block.bindings[chord]
+        removed.push(chord)
+      }
+    }
+    if (removed.length === 0) return `There are no ccpopout keys in ${path}, so there was nothing to remove.`
+    // A Chat block that held only ccpopout's keys goes with them.
+    file.bindings = blocks.filter(block => !chat.includes(block) || Object.keys(block.bindings ?? {}).length > 0)
+    await save()
+    return [`Removed ccpopout's keys from ${path}:`, ...removed.map(keyLine)].join('\n')
+  }
+
+  const added: string[] = []
+  const kept: string[] = []
+  const taken: string[] = []
+  for (const [chord, action] of Object.entries(KEYS)) {
+    const bound = chat.find(block => block.bindings !== undefined && chord in block.bindings)?.bindings?.[chord]
+    if (bound === action) kept.push(chord)
+    else if (bound !== undefined) taken.push(chord)
+    else {
+      let block = chat[0]
+      if (block === undefined) {
+        block = { context: 'Chat', bindings: {} }
+        blocks.push(block)
+        chat.push(block)
+      }
+      block.bindings = { ...block.bindings, [chord]: action }
+      added.push(chord)
+    }
+  }
+  if (added.length > 0) await save()
+  const lines: string[] = []
+  if (added.length > 0) lines.push(`Added to ${path}:`, ...added.map(keyLine))
+  if (kept.length > 0) lines.push(added.length > 0 ? 'Already there:' : `ccpopout's keys are already in ${path}:`, ...kept.map(keyLine))
+  if (taken.length > 0) {
+    lines.push(
+      `Left alone, because you use ${taken.length === 1 ? 'this key' : 'these keys'} for something else:`,
+      ...taken.map(chord => `  ${chord}`),
+    )
+  }
+  if (added.length > 0) lines.push('Take them out again with /popout keys remove.')
+  return lines.join('\n')
+}
+
 /** The views last chosen, kept for every session in a file the side pane shares: `{ isClean?, isThinkingHidden? }`. */
 async function readViews($: EngineInterface): Promise<Record<string, unknown>> {
   const config = await configDir($)
@@ -701,7 +794,10 @@ async function sideOf($: EngineInterface, asked: Side | undefined): Promise<Side
  *
  * In Herdr Desktop (herdr-core, `hc`) the pane is a terminal started with the
  * space and tab labels of this one: Desktop places it on the right, half the
- * width, and leaves the focus here. Its side, size and zoom are not ours to set.
+ * width, and leaves the focus here. Its size and zoom are not ours to set. The
+ * ccpopout mod in Desktop (`herdr-app/ccpopout`) does the rest: on the left it
+ * swaps it with this pane and labels it `ccpopout.placed=left`, and it focuses
+ * the pane each time its `ccpopout.focus` label changes.
  *
  * @returns '' once it is open (or was, and now has focus), 'none' where there
  *          is no multiplexer, else what went wrong
@@ -709,8 +805,11 @@ async function sideOf($: EngineInterface, asked: Side | undefined): Promise<Side
 async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   const open = await read($, sidePane)
   if (open !== null && (await isSidePaneAlive($, open))) {
-    // hc has no focus to give: the open pane is left as it is.
-    if (open.mux === 'hc') return ''
+    // In Herdr Desktop the ccpopout mod gives the focus, when this label changes.
+    if (open.mux === 'hc') {
+      await stdoutOf($, [await hcBin($), 'label', open.id, `ccpopout.focus=${await $.clock.now()}`])
+      return ''
+    }
     if (open.mux === 'tmux') await stdoutOf($, ['tmux', 'select-pane', '-t', open.id])
     else await stdoutOf($, [await herdrBin($), 'pane', 'focus', '--direction', open.direction, '--pane', open.from])
     return ''
@@ -759,13 +858,17 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
   } catch {}
 
   if (hcPlace !== undefined && hcFrom !== undefined) {
-    if (side === 'left') $.ui.toast('popout: hc opens side panes only on the right')
     const hc = await hcBin($)
+    // Desktop opens it on the right; on the left, the ccpopout mod there swaps
+    // it with the pane of the terminal named here.
+    const left = side === 'left' ? ['--label', 'ccpopout.side=left', '--label', `ccpopout.from=${hcFrom}`] : []
+    // Desktop leaves the focus here: the mod moves it to the new pane, as herdr's --focus does.
+    const focus = ['--label', `ccpopout.focus=${await $.clock.now()}`]
     // hc runs from a narrow PATH: the program is named by its full path, as node is.
     // --no-notify: no notes about the pane typed into this terminal.
     const started = await stdoutOf($, [
       hc, 'run', '--bg', '--no-notify', '--json', '--cwd', cwd,
-      '--label', `herdr.space=${hcPlace.space}`, '--label', `herdr.tab=${hcPlace.tab}`,
+      '--label', `herdr.space=${hcPlace.space}`, '--label', `herdr.tab=${hcPlace.tab}`, ...left, ...focus,
       '--', ...program,
     ])
     let id: unknown
@@ -773,7 +876,16 @@ async function openSidePane($: EngineInterface, side: Side): Promise<string> {
       id = JSON.parse(started ?? '{}').address
     } catch {}
     if (typeof id !== 'string' || id === '') return 'hc could not start the program'
-    const pane: SidePane = { mux: 'hc', id, from: hcFrom, direction: 'right' }
+    let isLeft = false
+    for (let waited = 0; side === 'left' && waited < HC_PLACE_MS; waited += HC_PLACE_POLL_MS) {
+      await $.clock.sleep(HC_PLACE_POLL_MS)
+      isLeft = (await hcTerminal($, id))?.labels?.['ccpopout.placed'] === 'left'
+      if (isLeft) break
+    }
+    if (side === 'left' && !isLeft) {
+      $.ui.toast('popout: Herdr Desktop opened it on the right; its ccpopout mod moves it left (see the README)')
+    }
+    const pane: SidePane = { mux: 'hc', id, from: hcFrom, direction: isLeft ? 'left' : 'right' }
     await update($, sidePane, () => pane)
     return ''
   }
@@ -843,7 +955,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'popout',
       description: 'Read the session: what Claude did since each of your messages',
-      argumentHint: '[side|left|right|close]',
+      argumentHint: '[side|left|right|close|keys add|keys remove]',
       immediate: true,
     })
     // `/popout side`, `left` and `right` under names of their own: a key binds
@@ -867,12 +979,21 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'popout' }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
+    const arg = e.args.trim().toLowerCase().replace(/\s+/g, ' ')
     if (arg === 'side') await showSidePane($)
     else if (arg === 'left' || arg === 'right') await showSidePane($, arg)
     else if (arg === 'close') {
       if (!(await closeSidePane($))) $.ui.toast('popout: no side pane is open')
-    } else if (arg !== '') return { text: `Usage: /popout [side|left|right|close] (got "${e.args.trim()}")` }
+    } else if (arg === 'keys add' || arg === 'keys remove') return { text: await keysCommand($, arg === 'keys add') }
+    else if (arg === 'keys') {
+      return {
+        text: [
+          'ccpopout can give itself these keys:',
+          ...Object.keys(KEYS).map(keyLine),
+          '/popout keys add puts them in your keybindings.json; /popout keys remove takes them out.',
+        ].join('\n'),
+      }
+    } else if (arg !== '') return { text: `Usage: /popout [side|left|right|close|keys add|keys remove] (got "${e.args.trim()}")` }
     else await openInnerPane($)
     return {}
   })

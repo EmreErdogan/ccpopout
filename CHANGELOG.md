@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.9.0 — 2026-11-25
+
 ### Commands
 
 - `/popout keys add` adds keys for ccpopout to your `keybindings.json`: `ctrl+x r` (`/popout`), `ctrl+x t` (`/popout-side`) and `ctrl+x l` (`/popout-left`). A key you already use for something else stays yours. `/popout keys remove` takes them out again.
@@ -13,7 +15,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 - Tables draw a rule between every two rows, not only under the header.
 - In Herdr Desktop it opens on the left too, with the ccpopout mod in Desktop: Desktop opens it on the right, and the mod swaps it with Claude Code's pane. Without the mod it stays on the right, and says so.
-- In Herdr Desktop the side pane takes the focus when it opens, as in herdr, and `/popout side` gives it the focus again while it is open. This also needs the ccpopout mod. `node herdr-app/install.mjs` installs the mod and `node herdr-app/uninstall.mjs` removes it; `herdr-app/INSTALL.md` walks an agent through either.
+- In Herdr Desktop the side pane takes the focus when it opens, as in herdr, and `/popout side` gives it the focus again while it is open. This also needs the ccpopout mod.
+- `node herdr-app/install.mjs` installs the mod and `node herdr-app/uninstall.mjs` removes it, run where Herdr Desktop runs; `herdr-app/INSTALL.md` walks an agent through either.
 
 ## v0.8.2 — 2026-11-23
 

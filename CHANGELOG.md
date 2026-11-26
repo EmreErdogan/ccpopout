@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.9.1 — 2026-11-26
+
 ### Both panes
 
 - `j` and the wheel no longer jump past a long reply at the top of a turn: where the next item starts below the row being read, they scroll a row, so the reply is read from its start.

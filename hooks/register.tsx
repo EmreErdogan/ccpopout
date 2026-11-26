@@ -432,14 +432,17 @@ async function scrollWindow($: EngineInterface, by: number): Promise<void> {
 
 /**
  * `j` and `k`, and a wheel tick. In the fullscreen layout, with the window at
- * the turn's top, `j` takes the cursor to the next item until it has come to
- * the row being read, and `k` to the one before; elsewhere they scroll a row.
+ * the turn's top, `j` takes the cursor to the next item while that item starts
+ * no lower than the row being read, and `k` to the one before; elsewhere they
+ * scroll a row. A long item is so read row by row: the next one past the row
+ * being read would take the window over the rest of it.
  */
 async function scrollRow($: EngineInterface, step: number): Promise<void> {
   if (isCentered && anchor === undefined && !(await read($, isHelpShown)) && Math.min(await read($, scrollRows), maxScroll) === 0) {
     const cursor = await read($, cursorItem)
     const at = itemRows.findIndex(rows => rows.item === cursor)
-    const isShort = step > 0 ? at !== -1 && (itemRows[at]?.first ?? 0) < readRowOf(windowRows) && at < itemRows.length - 1 : at > 0
+    const next = at === -1 ? undefined : itemRows[at + 1]
+    const isShort = step > 0 ? next !== undefined && next.first <= readRowOf(windowRows) : at > 0
     if (isShort) return moveCursor($, step)
   }
   await scrollWindow($, step)

@@ -1427,16 +1427,19 @@ class View {
 
   /**
    * `j` and `k`, and the wheel. With the window at the turn's top, `j` takes
-   * the cursor to the next item until it has come to the row being read, and
-   * `k` to the one before (the window cannot move up); elsewhere they scroll a
-   * row, the cursor to the item at the row being read.
+   * the cursor to the next item while that item starts no lower than the row
+   * being read, and `k` to the one before (the window cannot move up);
+   * elsewhere they scroll a row, the cursor to the item at the row being read.
+   * A long item is so read row by row: the next one past the row being read
+   * would take the window over the rest of it.
    */
   rowKey(step) {
     if (!this.isHelp && !this.isFollowing && Math.min(this.scroll, this.maxScroll) === 0) {
       const items = this.items()
       const at = items.indexOf(this.cursor)
-      const first = this.build().findIndex(line => line.item === this.cursor)
-      const isShort = step > 0 ? first !== -1 && first < this.readRow && at < items.length - 1 : at > 0
+      const next = items[at + 1]
+      const first = next === undefined || at === -1 ? -1 : this.build().findIndex(line => line.item === next)
+      const isShort = step > 0 ? first !== -1 && first <= this.readRow : at > 0
       if (isShort) {
         this.back = undefined
         return this.move(step)

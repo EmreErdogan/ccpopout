@@ -459,6 +459,55 @@ test('an item that reaches past the window is come to at its first row, from abo
   await ui.unmount()
 })
 
+test('`j` and the wheel read a long item row by row from the turn\'s top, not past it', async ($, on) => {
+  // A reply and a call (rows 0 to 3, with their blanks), a reply of fifty rows (4 to 53), a call (55).
+  const long = Array.from({ length: 50 }, (_, at) => `Row ${at}.`).join('\n')
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: 'a long reply', toolUses: [] },
+      { role: 'assistant', text: 'Start.', toolUses: [{ tool_use_id: 'c0', tool: 'Bash', input: { command: 'echo 0' }, text: '0' }] },
+      { role: 'assistant', text: long, toolUses: [{ tool_use_id: 'c1', tool: 'Bash', input: { command: 'echo 1' }, text: '1' }] },
+    ],
+  }))
+  on('clock.sleep', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } as never }
+  })
+  const wheel = (by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' }, pointer: { column: 10, row: 10 } } as never)
+
+  // Twenty-seven rows of body: the row read has eleven above it.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const rule = async () => ((await ui.find({ text: /─── / }))?.text ?? '').match(/(top|↑ \d+) · (end|↓ \d+)/)?.[0]
+  const places: (string | undefined)[] = []
+  for (let at = 0; at < 3; at++) {
+    await ui.press({ key: 'down' })
+    places.push(await rule())
+  }
+  // The call, the long reply, and then a row: the call after the reply starts
+  // past the row read, and coming to it would take the window over the reply unread.
+  expect(places).toEqual(['top · ↓ 29', 'top · ↓ 29', '↑ 1 · ↓ 28'])
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe(long)
+  // Row by row through the reply, to the call after it at the row read (55 - 11).
+  await presses(ui, 'down', 43)
+  expect(await rule()).toBe('↑ 44 · end')
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe('$ echo 1\n1')
+
+  // The wheel the same: back at the top, on the reply, a tick is a row.
+  await presses(ui, 'up', 44)
+  expect(await rule()).toBe('top · ↓ 29')
+  await wheel(1)
+  expect(await rule()).toBe('↑ 1 · ↓ 28')
+  await ui.press({ key: 'copy' })
+  expect(copied.at(-1)).toBe(long)
+  await ui.unmount()
+})
+
 test('a turn shown again is where it was left, and the rule counts the items shown', async ($, on) => {
   const toolUses = Array.from({ length: 40 }, (_, at) => ({ tool_use_id: `c${at}`, tool: 'Bash', input: { command: `echo ${at}` }, text: `${at}` }))
   on('session.messages', () => ({

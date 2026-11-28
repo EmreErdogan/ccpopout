@@ -5,6 +5,8 @@ What changed in each release of ccpopout. The same notes are on the
 
 ## Unreleased
 
+## v0.9.2 — 2026-11-28
+
 ### Both panes
 
 - The row being read, where `↑` and `↓` bring an item and scrolling picks the cursor's item, is about a third of the way down the window (35% of its rows), not two rows above its middle.

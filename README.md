@@ -260,8 +260,8 @@ to the first and the last item; while `G` follows new output, a cursor left on
 the last item moves on to each new one.
 
 The cursor marks the item being read. In the side pane, and in the in-app pane
-under Claude Code's fullscreen layout, the row being read is two rows above the
-middle of the window, where the eye rests. `↑` and `↓` bring the first row of
+under Claude Code's fullscreen layout, the row being read is about a third of the
+way down the window (35%), where the eye rests. `↑` and `↓` bring the first row of
 the item the cursor moves to there, however long the item is; the rest of a
 long one is read by scrolling. Scrolling (`j`/`k`, `d`/`u`, the wheel) takes
 the cursor to the item at the row being read, or the one nearest it.

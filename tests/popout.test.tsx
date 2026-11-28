@@ -307,7 +307,7 @@ test('the pane moves a cursor over the items, opens the one it is on and copies 
   await ui.unmount()
 })
 
-test('in the fullscreen layout the cursor\'s item is held at the row being read, a little above the middle', async ($, on) => {
+test('in the fullscreen layout the cursor\'s item is held at the row being read, about a third of the way down', async ($, on) => {
   // A reply, a blank row, forty folded calls: 42 rows.
   const toolUses = Array.from({ length: 40 }, (_, at) => ({ tool_use_id: `c${at}`, tool: 'Bash', input: { command: `echo ${at}` }, text: `${at}` }))
   on('session.messages', () => ({
@@ -330,76 +330,76 @@ test('in the fullscreen layout the cursor\'s item is held at the row being read,
     for (let at = 0; at < times; at++) await arrow(by)
   }
 
-  // Thirty rows: three of header, twenty-seven of body; the row read has eleven above it, two short of the middle.
+  // Thirty rows: three of header, twenty-seven of body; the row read has nine above it, a third of the way down.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // Near the top there is nothing above to scroll to: the window stays.
-  await arrows(1, 10)
+  await arrows(1, 8)
   expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
   // From there on each item comes to the row read.
-  await arrows(1, 9)
-  expect(await ui.find({ text: /↑ 9 · ↓ 6/ })).toBeDefined()
+  await arrows(1, 11)
+  expect(await ui.find({ text: /↑ 11 · ↓ 4/ })).toBeDefined()
   // The last one too, over the blank rows past the turn's end.
   await arrows(1, 21)
-  expect(await ui.find({ text: /↑ 30 · end/ })).toBeDefined()
+  expect(await ui.find({ text: /↑ 32 · end/ })).toBeDefined()
   expect(await ui.find({ text: /echo 39/ })).toBeDefined()
-  expect(await ui.find({ text: /echo 27/ })).toBeUndefined()
+  expect(await ui.find({ text: /echo 29/ })).toBeUndefined()
   // The window goes no further than that.
   await presses(ui, 'pageDown', 3)
-  expect(await ui.find({ text: /↑ 30 · end/ })).toBeDefined()
+  expect(await ui.find({ text: /↑ 32 · end/ })).toBeDefined()
   await arrows(-1, 40)
   expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
 
-  // Scrolled a page, the cursor is on the item at the row read: half a page down, that is row 13 + 11, the call `echo 22`.
+  // Scrolled a page, the cursor is on the item at the row read: half a page down, that is row 13 + 9, the call `echo 20`.
   await ui.press({ key: 'pageDown' })
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 22\n22')
+  expect(copied.at(-1)).toBe('$ echo 20\n20')
   await arrow(1)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 23\n23')
+  expect(copied.at(-1)).toBe('$ echo 21\n21')
   await presses(ui, 'pageUp', 2)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 9\n9')
+  expect(copied.at(-1)).toBe('$ echo 7\n7')
   await arrows(-1, 40)
 
   // At the turn's top, `j` takes the cursor item by item, the window still,
-  // until it has come to the row read: the call `echo 9`, at row 11.
-  for (let at = 0; at < 10; at++) {
+  // until it has come to the row read: the call `echo 7`, at row 9.
+  for (let at = 0; at < 8; at++) {
     await ui.press({ key: 'down' })
     await ui.press({ key: 'copy' })
     expect(copied.at(-1)).toBe(`$ echo ${at}\n${at}`)
   }
   expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
-  // From there it scrolls, the cursor at the row read: row 3 + 11, the call `echo 12`.
+  // From there it scrolls, the cursor at the row read: row 3 + 9, the call `echo 10`.
   await presses(ui, 'down', 3)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 12\n12')
+  expect(copied.at(-1)).toBe('$ echo 10\n10')
   expect(await ui.find({ text: /↑ 3 · ↓ 12/ })).toBeDefined()
   // Back at the top, `k` takes it to the item before.
   await presses(ui, 'up', 3)
   await ui.press({ key: 'up' })
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 8\n8')
+  expect(copied.at(-1)).toBe('$ echo 6\n6')
 
   // The wheel does as `j` and `k`: at the top, item by item, the window still.
   const wheel = (by: number) =>
     $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' }, pointer: { column: 10, row: 10 } } as never)
   await wheel(1)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 9\n9')
+  expect(copied.at(-1)).toBe('$ echo 7\n7')
   await wheel(-1)
   await wheel(-1)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 7\n7')
+  expect(copied.at(-1)).toBe('$ echo 5\n5')
   expect(await ui.find({ text: /top · ↓ 15/ })).toBeDefined()
-  // Past the top it takes the cursor to the item at the row read, both ways: row 13 + 11, then 11 + 11.
+  // Past the top it takes the cursor to the item at the row read, both ways: row 13 + 9, then 11 + 9.
   await arrows(1, 12)
   for (let at = 0; at < 3; at++) await wheel(1)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 22\n22')
+  expect(copied.at(-1)).toBe('$ echo 20\n20')
   await wheel(-1)
   await wheel(-1)
   await ui.press({ key: 'copy' })
-  expect(copied.at(-1)).toBe('$ echo 20\n20')
+  expect(copied.at(-1)).toBe('$ echo 18\n18')
   await arrows(-1, 40)
   await ui.unmount()
 
@@ -433,7 +433,7 @@ test('an item that reaches past the window is come to at its first row, from abo
   const arrow = (by: number) =>
     $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' } } as never)
 
-  // Twenty-seven rows of body: the row read has eleven above it.
+  // Twenty-seven rows of body: the row read has nine above it.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rule = async () => ((await ui.find({ text: /─── / }))?.text ?? '').match(/(top|↑ \d+) · (end|↓ \d+)/)?.[0]
   const places: (string | undefined)[] = []
@@ -441,8 +441,8 @@ test('an item that reaches past the window is come to at its first row, from abo
     await arrow(1)
     places.push(await rule())
   }
-  // The call, the long reply (its first row above the row read already), and the call after it (55 - 11).
-  expect(places).toEqual(['top · ↓ 29', 'top · ↓ 29', '↑ 44 · end'])
+  // The call, the long reply (its first row above the row read already), and the call after it (55 - 9).
+  expect(places).toEqual(['top · ↓ 29', 'top · ↓ 29', '↑ 46 · end'])
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe('$ echo 1\n1')
 
@@ -479,7 +479,7 @@ test('`j` and the wheel read a long item row by row from the turn\'s top, not pa
   const wheel = (by: number) =>
     $.ui.scroll({ component: 'Pane', requestId: 'popout', offset: 1 + by, by, bodyRows: 30, contentRows: 60, origin: { kind: 'person' }, pointer: { column: 10, row: 10 } } as never)
 
-  // Twenty-seven rows of body: the row read has eleven above it.
+  // Twenty-seven rows of body: the row read has nine above it.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rule = async () => ((await ui.find({ text: /─── / }))?.text ?? '').match(/(top|↑ \d+) · (end|↓ \d+)/)?.[0]
   const places: (string | undefined)[] = []
@@ -492,14 +492,14 @@ test('`j` and the wheel read a long item row by row from the turn\'s top, not pa
   expect(places).toEqual(['top · ↓ 29', 'top · ↓ 29', '↑ 1 · ↓ 28'])
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe(long)
-  // Row by row through the reply, to the call after it at the row read (55 - 11).
-  await presses(ui, 'down', 43)
-  expect(await rule()).toBe('↑ 44 · end')
+  // Row by row through the reply, to the call after it at the row read (55 - 9).
+  await presses(ui, 'down', 45)
+  expect(await rule()).toBe('↑ 46 · end')
   await ui.press({ key: 'copy' })
   expect(copied.at(-1)).toBe('$ echo 1\n1')
 
   // The wheel the same: back at the top, on the reply, a tick is a row.
-  await presses(ui, 'up', 44)
+  await presses(ui, 'up', 46)
   expect(await rule()).toBe('top · ↓ 29')
   await wheel(1)
   expect(await rule()).toBe('↑ 1 · ↓ 28')
@@ -526,13 +526,13 @@ test('a turn shown again is where it was left, and the rule counts the items sho
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ text: /▌ 1\/41 / })).toBeDefined()
   for (let at = 0; at < 15; at++) await arrow(1)
-  // The call `echo 14`, its first row (16) at the row read (11).
-  expect(await ui.find({ text: /▌ 16\/41  ↑ 5 · ↓ 10/ })).toBeDefined()
+  // The call `echo 14`, its first row (16) at the row read (9).
+  expect(await ui.find({ text: /▌ 16\/41  ↑ 7 · ↓ 8/ })).toBeDefined()
   await ui.press({ key: 'older' })
   expect(await ui.find({ text: /1\/2 › a short turn/ })).toBeDefined()
   expect(await ui.find({ text: /▌ 1\/1 / })).toBeDefined()
   await ui.press({ key: 'newer' })
-  expect(await ui.find({ text: /▌ 16\/41  ↑ 5 · ↓ 10/ })).toBeDefined()
+  expect(await ui.find({ text: /▌ 16\/41  ↑ 7 · ↓ 8/ })).toBeDefined()
 
   // The clean view counts what it shows: the reply alone.
   await ui.press({ key: 'clean' })

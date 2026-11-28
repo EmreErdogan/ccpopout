@@ -49,12 +49,12 @@ const KEYS: Readonly<Record<string, string>> = {
   'ctrl+x t': 'command:popout-side',
   'ctrl+x l': 'command:popout-left',
 }
-/** How many rows above the window's middle the row being read is: about where the eye rests. */
-const READ_LIFT = 2
+/** How far down the window the row being read is, as a share of its rows: about where the eye rests. */
+const READ_SHARE = 0.35
 
-/** The row of a window `rows` tall being read, from 0: a little above its middle. */
+/** The row of a window `rows` tall being read, from 0: about a third of the way down. */
 function readRowOf(rows: number): number {
-  return Math.max(0, ((rows - 1) >> 1) - READ_LIFT)
+  return Math.max(0, Math.floor((rows - 1) * READ_SHARE))
 }
 
 /** Where each turn shown before was left, by its prompt's place among the messages: going back returns there. */
@@ -72,7 +72,7 @@ let drawnScroll = 0
 let drawnWidth = 0
 /**
  * Of the turn last drawn: true in the fullscreen layout, where the cursor's
- * item is held at the middle of the window and blank rows past the turn's
+ * item is held at the row being read and blank rows past the turn's
  * last let the last item come there too.
  */
 let isCentered = false
@@ -518,7 +518,7 @@ async function flash($: EngineInterface, text: string): Promise<void> {
 /**
  * Moves the cursor an item up or down the turn last drawn, the window after
  * it. In the fullscreen layout the item's first row comes to the row being
- * read, a little above the middle of the window. Elsewhere the item comes whole into view, or its top where it is
+ * read, about a third of the way down the window. Elsewhere the item comes whole into view, or its top where it is
  * taller.
  */
 async function moveCursor($: EngineInterface, step: number): Promise<void> {

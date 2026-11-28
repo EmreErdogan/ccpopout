@@ -34,8 +34,8 @@ const TITLE_ROWS = 2
 const ROOMY_ROWS = 16
 /** A terminal sends a few wheel events to a notch: a row each makes about three to the notch. */
 const WHEEL_ROWS = 1
-/** How many rows above the window's middle the row being read is: about where the eye rests. */
-const READ_LIFT = 2
+/** How far down the window the row being read is, as a share of its rows: about where the eye rests. */
+const READ_SHARE = 0.35
 /** Two presses of the button this close in time, in one cell, are a double click. */
 const DOUBLE_CLICK_MS = 400
 /** The rows of a folded reply that stay in view. */
@@ -1394,9 +1394,9 @@ class View {
     return rows
   }
 
-  /** The row of the window being read, from 0: a little above its middle, where the eye rests. */
+  /** The row of the window being read, from 0: about a third of the way down, where the eye rests. */
   get readRow() {
-    return Math.max(0, ((this.windowRows - 1) >> 1) - READ_LIFT)
+    return Math.max(0, Math.floor((this.windowRows - 1) * READ_SHARE))
   }
 
   /** The blank rows past the turn's last, so the last item comes to the row being read too. */
@@ -1546,7 +1546,7 @@ class View {
     this.back = at
   }
 
-  /** Moves the cursor an item up or down, the item's first row to the middle of the window. */
+  /** Moves the cursor an item up or down, the item's first row to the row being read. */
   move(step) {
     const rows = this.build()
     const items = this.items()
